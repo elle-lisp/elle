@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-25
 //! How an activation ends: the dispatch loop's `Exit`, and the `ExecResult` a
 //! closed activation hands to whoever parks or completes it.
 //!
@@ -62,7 +62,10 @@ pub(crate) struct ExecResult {
     /// The active code object at exit (may differ from the input if a tail call
     /// occurred before the signal). The template-derived half of the context.
     pub code: crate::value::Code,
-    pub env: Rc<Vec<Value>>,
+    /// The active environment at a signal exit, which a park keeps. `None` on
+    /// a clean return, whose environment went back to the spares
+    /// (docs/impl/spares.md).
+    pub env: Option<Rc<Vec<Value>>>,
     /// The inner operand stack at a signal exit; empty on a clean return.
     pub stack: Vec<Value>,
     /// This activation's static→physical region remap, captured by
@@ -97,7 +100,7 @@ impl ExecResult {
     pub(super) fn ended(
         exit: Exit,
         code: crate::value::Code,
-        env: Rc<Vec<Value>>,
+        env: Option<Rc<Vec<Value>>>,
         stack: Vec<Value>,
         current_closure: Value,
     ) -> Self {
@@ -112,5 +115,13 @@ impl ExecResult {
             activation_dues: ActivationDues::default(),
             current_closure,
         }
+    }
+
+    /// The environment a park of this result keeps. Only a signal exit parks,
+    /// and a signal exit keeps its environment.
+    pub(crate) fn parked_env(&self) -> Rc<Vec<Value>> {
+        self.env
+            .clone()
+            .expect("VM bug: a signal exit keeps its environment")
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! Value accessors for extracting typed data from Values.
 //!
 //! docs/impl/values.md
@@ -185,10 +185,19 @@ impl Value {
     /// list allocates fresh syntax wrappers, so it needs [`Self::list_to_vec_in`], which
     /// takes the heap. A syntax object here is reported as an improper list.
     pub fn list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
+        let mut items = Vec::new();
+        self.list_into(&mut items).map(|()| items)
+    }
+
+    /// Append a proper cons-list's items to `out`, as [`Self::list_to_vec`]
+    /// reads them. Copies into a buffer the caller keeps, so a warm buffer
+    /// allocates nothing (docs/impl/spares.md). On an improper list, `out`
+    /// holds the items before the break.
+    pub fn list_into(&self, out: &mut Vec<Value>) -> Result<(), &'static str> {
         if self.as_syntax().is_some() {
             return Err("Not a proper list");
         }
-        self.cons_list_to_vec()
+        self.cons_list_into(out)
     }
 
     /// Convert a proper list to a `Vec`, unwrapping a syntax-wrapped list into
@@ -209,30 +218,28 @@ impl Value {
             }
             return Err("Not a proper list");
         }
-        self.cons_list_to_vec()
+        let mut items = Vec::new();
+        self.cons_list_into(&mut items).map(|()| items)
     }
 
-    /// The allocation-free cons-list walk shared by `list_to_vec` and
-    /// `list_to_vec_in`. Handles a syntax-wrapped `nil`/empty list reached as a
-    /// list tail (for example from `letrec` in macros).
-    fn cons_list_to_vec(&self) -> Result<Vec<Value>, &'static str> {
-        let mut result = Vec::new();
+    /// The cons-list walk shared by `list_into` and `list_to_vec_in`, pushing
+    /// each item onto `out`. Handles a syntax-wrapped `nil`/empty list reached
+    /// as a list tail (for example from `letrec` in macros).
+    fn cons_list_into(&self, out: &mut Vec<Value>) -> Result<(), &'static str> {
         let mut current = *self;
         loop {
             if current.is_nil() || current.is_empty_list() {
-                return Ok(result);
+                return Ok(());
             }
             if let Some(syntax) = current.as_syntax() {
                 match &syntax.kind {
-                    crate::syntax::SyntaxKind::Nil => return Ok(result),
-                    crate::syntax::SyntaxKind::List(items) if items.is_empty() => {
-                        return Ok(result)
-                    }
+                    crate::syntax::SyntaxKind::Nil => return Ok(()),
+                    crate::syntax::SyntaxKind::List(items) if items.is_empty() => return Ok(()),
                     _ => {}
                 }
             }
             if let Some(pair) = current.as_pair() {
-                result.push(pair.first);
+                out.push(pair.first);
                 current = pair.rest;
             } else {
                 return Err("Not a proper list");

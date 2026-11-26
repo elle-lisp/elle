@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-25
 //! The interpreter's activation owner node: freed at completion, carried across parks and fuel pauses.
 //!
 //! docs/impl/region/owner.md
@@ -295,9 +295,10 @@ fn activation_owner_node_rides_exec_result_across_fuel_pause() {
 
         // Build the park from the returned context, exactly as
         // `do_fiber_first_resume` does for a paused fiber body.
+        let env = result.parked_env();
         let frame = BytecodeFrame::suspend(
             result.code,
-            result.env,
+            env,
             result.ip,
             result.stack,
             !result.bits.intersects(crate::value::SIG_FUEL),

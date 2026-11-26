@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! A tail callee the JIT compiled: the pending call a tail resolver builds for it, and the trampoline's arm that runs it.
 //!
 //! docs/impl/jit.md
@@ -58,19 +58,13 @@ impl VM {
         code: CachedCode,
         func: Value,
         closure: &crate::value::Closure,
-        args: Vec<Value>,
+        args: &[Value],
         spliced_args: bool,
     ) -> TailCallInfo {
         let heap = unsafe { &mut *self.heap_ptr };
-        let fixed = FixedArgs::of(closure, &args);
+        let fixed = FixedArgs::of(closure, args);
         let releases: Vec<RuntimeRegion> = if spliced_args {
-            crate::jit::dispatch::incref_owned_call_args(
-                heap,
-                closure,
-                &args,
-                fixed,
-                ArgRefs::Mint,
-            );
+            crate::jit::dispatch::incref_owned_call_args(heap, closure, args, fixed, ArgRefs::Mint);
             let held: Vec<RuntimeRegion> = args
                 .iter()
                 .enumerate()
@@ -82,12 +76,12 @@ impl VM {
             }
             held
         } else if fixed.count() < args.len() {
-            Self::moved_rest_releases(&args[fixed.count()..], &args, heap)
+            Self::moved_rest_releases(&args[fixed.count()..], args, heap)
         } else {
             Vec::new()
         };
         let boundary = crate::value::closure::Boundary::of(closure);
-        TailCallInfo::compiled(code, func, args, releases, boundary)
+        TailCallInfo::compiled(code, func, args.to_vec(), releases, boundary)
     }
 
     /// Run `tail`, the compiled body of the tail callee `closure_val`, in the

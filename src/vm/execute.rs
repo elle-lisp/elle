@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! Bytecode execution entry points, and the opening and closing of an
 //! activation. The tail-call trampoline is in `trampoline.rs`, and its arm
 //! for a tail callee the JIT compiled in `compiled.rs`.
@@ -168,7 +168,10 @@ impl VM {
             // keeps the activation alive to the recursion's completion here,
             // and so keeps everything it owes.
             self.release_activation_dues();
-            return ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure);
+            // Nothing parks a clean return, so its environment goes back to the
+            // spares where nothing else holds it (docs/impl/spares.md).
+            self.spares.give_env(env);
+            return ExecResult::ended(exit, code, None, vec![], self.fiber.current_closure);
         }
         let parked = self.fiber.suspended.is_some();
         if let Some(bits) =
@@ -180,7 +183,7 @@ impl VM {
             return self.end_replaced_activation(code, env, exit.bits, exit.ip, parked);
         }
         let stack = std::mem::take(&mut self.fiber.stack).into_vec();
-        ExecResult::ended(exit, code, env, stack, self.fiber.current_closure)
+        ExecResult::ended(exit, code, Some(env), stack, self.fiber.current_closure)
     }
 
     /// Close out an activation that a tail call replaced and ended at `ip`,
@@ -203,7 +206,7 @@ impl VM {
         self.release_activation_dues();
         self.fiber.stack.clear();
         let exit = Exit::raised(bits, ip, RaiseSite::TailEnded);
-        ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure)
+        ExecResult::ended(exit, code, Some(env), vec![], self.fiber.current_closure)
     }
 
     /// Open a fresh activation: a region-remap frame, so the body's static

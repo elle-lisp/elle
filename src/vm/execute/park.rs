@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-25
 //! The park an activation's error exit builds, when nothing inside it parked a frame already.
 //!
 //! docs/impl/vm.md
@@ -44,7 +44,7 @@ impl VM {
         }
         let frame = BytecodeFrame::suspend(
             result.code.clone(),
-            result.env.clone(),
+            result.parked_env(),
             result.ip,
             std::mem::take(&mut result.stack),
             result.site.delivers(),

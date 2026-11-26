@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-25
 //! The per-activation region-remap frame and the dues slot beside it: what
 //! an activation owes the region system, and who discharges it.
 //!
@@ -9,13 +9,17 @@ use crate::value::fiber::ActivationDues;
 
 impl VM {
     /// Push a fresh region-remap frame on closure entry, with its (empty)
-    /// parallel dues slot (docs/impl/region/owner.md).
+    /// parallel dues slot (docs/impl/region/owner.md), whose deferred list is
+    /// a spare (docs/impl/spares.md).
     #[inline]
     pub(crate) fn push_activation_region_map(&mut self) {
         self.fiber
             .activation_region_maps
             .push(rustc_hash::FxHashMap::default());
-        self.fiber.activation_dues.push(ActivationDues::default());
+        let spare = self.spares.deferred();
+        self.fiber
+            .activation_dues
+            .push(ActivationDues::owing_nothing(spare));
         debug_assert_eq!(
             self.fiber.activation_region_maps.len(),
             self.fiber.activation_dues.len(),
@@ -94,9 +98,10 @@ impl VM {
     /// drop instruction (docs/impl/region/owner.md).
     pub(crate) fn release_activation_dues(&mut self) {
         let dues = self.take_activation_dues();
-        for region in dues.deferred {
+        for &region in &dues.deferred {
             self.heap().decref_region_if_present(region);
         }
+        self.spares.give_deferred(dues.deferred);
         if let Some(node) = dues.owner_node {
             self.heap().decref_region_if_present(node);
         }

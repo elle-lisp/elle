@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -26,7 +26,7 @@ impl VM {
     pub(super) fn call_inner(
         &mut self,
         func: Value,
-        args: Vec<Value>,
+        args: &[Value],
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
         ip: &mut usize,
@@ -44,9 +44,9 @@ impl VM {
                 def.name,
                 args.len()
             );
-            let blocked = self.capability_blocked(def, &args);
+            let blocked = self.capability_blocked(def, args);
             if !blocked.is_empty() {
-                return self.handle_capability_denial(def, blocked, &args, code, closure_env, ip);
+                return self.handle_capability_denial(def, blocked, args, code, closure_env, ip);
             }
             if !checked && !self.check_native_arity(def, args.len()) {
                 self.fiber.stack.push(Value::NIL);
@@ -57,7 +57,7 @@ impl VM {
             // primitive's allocations into it, and hands the caller the
             // pass-through retain. Shared with the JIT (`elle_jit_call`) so both
             // tiers account identically; see `VM::dispatch_native_call`.
-            let (bits, value) = self.dispatch_native_call(def, args.as_slice(), region_id);
+            let (bits, value) = self.dispatch_native_call(def, args, region_id);
             // A terminal :error hands the payload to a catcher, whose read
             // consumes one reference this frame's own routes do not fund. So the
             // raise mints it here, where the payload is an argument of this call:
@@ -74,16 +74,9 @@ impl VM {
                 && crate::signals::dispatch::classify(bits, &value)
                     == crate::signals::dispatch::SignalAction::Error
             {
-                self.mint_raised_argument_delivery(args.as_slice(), value);
+                self.mint_raised_argument_delivery(args, value);
             }
-            return self.handle_primitive_signal(
-                bits,
-                value,
-                args.as_slice(),
-                code,
-                closure_env,
-                ip,
-            );
+            return self.handle_primitive_signal(bits, value, args, code, closure_env, ip);
         }
 
         if let Some((id, default)) = func.as_parameter() {
@@ -130,7 +123,7 @@ impl VM {
             }
             let taken = moves
                 .offered()
-                .take(closure, handoff::FixedArgs::of(closure, &args));
+                .take(closure, handoff::FixedArgs::of(closure, args));
 
             // GPU capability check: if this closure has been GIT'd (has SPIR-V),
             // it requires GPU hardware. Check capability before dispatch.
@@ -171,7 +164,7 @@ impl VM {
             // Checked before JIT because WASM is the preferred fast path when enabled.
             #[cfg(feature = "wasm")]
             if compiled_room && closure.template.has_lir() {
-                if let Some(bits) = self.try_wasm_call(closure, &args, func) {
+                if let Some(bits) = self.try_wasm_call(closure, args, func) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
                     return bits;
@@ -185,7 +178,7 @@ impl VM {
             if compiled_room
                 && self.mlir_enabled
                 && closure.template.has_lir()
-                && self.try_mlir_call(closure, &args).is_some()
+                && self.try_mlir_call(closure, args).is_some()
             {
                 self.fiber.call_depth -= 1;
                 self.fiber.call_stack.pop();
@@ -198,7 +191,7 @@ impl VM {
             #[cfg(feature = "jit")]
             if compiled_room && closure.template.has_lir() {
                 let param_depth = self.fiber.param_depth();
-                if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth, taken) {
+                if let Some(bits) = self.try_jit_call(closure, args, func, param_depth, taken) {
                     // Stamped before a park below drains the caller's stack.
                     moves.discharge(taken, &mut self.fiber.stack, caller_base);
                     self.fiber.call_depth -= 1;
@@ -263,7 +256,7 @@ impl VM {
             // `env_value_region`). There is no shared per-call "env region" to
             // commingle (Rule 6) or leak; each env value mints its own fresh
             // region.
-            let new_env_rc = match self.build_call_env(closure, &args, ArgRefs::MintExcept(taken)) {
+            let new_env_rc = match self.build_call_env(closure, args, ArgRefs::MintExcept(taken)) {
                 Some(env) => env,
                 None => {
                     self.fiber.call_depth -= 1;
@@ -310,7 +303,7 @@ impl VM {
         // collection's release under the consumer's borrow). The caller's
         // `DecrefValueRegion` at the `(arr i)` decref_point consumes that one
         // owning reference, exactly as for a `get` result.
-        if let Some(result) = self.dispatch_collection_call(&func, &args, region_id) {
+        if let Some(result) = self.dispatch_collection_call(&func, args, region_id) {
             match result {
                 Ok(value) => {
                     self.fiber.stack.push(value);

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 //! Replaying a fiber's suspended frame chain: each frame's stack, region map and
 //! dues are restored before its body is re-entered.
 //!
@@ -304,9 +304,10 @@ impl VM {
                             } else {
                                 // A fuel pause re-runs its instruction, so it
                                 // takes no resume value.
+                                let env = exec.parked_env();
                                 let re_suspend = BytecodeFrame::suspend(
                                     exec.code,
-                                    exec.env,
+                                    env,
                                     exec.ip,
                                     exec.stack,
                                     !bits.intersects(SIG_FUEL),

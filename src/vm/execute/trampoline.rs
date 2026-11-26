@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-25
 //! The tail-call trampoline: how an activation runs each pending tail callee in place of its body.
 //!
 //! docs/impl/vm.md
@@ -61,6 +61,25 @@ impl VM {
         (code, env, exit)
     }
 
+    /// Drop the replaced locals and run `tail` in place of the body `code` with
+    /// `env`, as [`Self::run_tail_callee`] does, leaving the callee's code and
+    /// environment in their place. The replaced environment goes back to the
+    /// spares (docs/impl/spares.md). Answers the exit `run` stopped at.
+    pub(in crate::vm) fn replace_with_tail_callee(
+        &mut self,
+        tail: crate::vm::core::TailCallInfo,
+        code: &mut crate::value::Code,
+        env: &mut Rc<Vec<Value>>,
+        run: fn(&mut VM, &crate::value::Code, &Rc<Vec<Value>>, usize) -> Exit,
+    ) -> Exit {
+        self.drop_replaced_locals();
+        let (next_code, next_env, exit) = self.run_tail_callee(tail, run);
+        *code = next_code;
+        let replaced = std::mem::replace(env, next_env);
+        self.spares.give_env(replaced);
+        exit
+    }
+
     /// Run an activation's body from `start_ip`, then hand it to the
     /// tail-call trampoline. `execute_bytecode_from_ip` and
     /// `execute_bytecode_saving_stack` enter here.
@@ -99,8 +118,12 @@ impl VM {
             if exit.bits.is_empty() {
                 if let Some(mut tail) = self.pending_tail_call.take() {
                     tail_boundary.add(tail.take_boundary(), self.fiber.param_depth());
-                    self.drop_replaced_locals();
-                    (code, env, exit) = self.run_tail_callee(tail, Self::run_dispatch);
+                    exit = self.replace_with_tail_callee(
+                        tail,
+                        &mut code,
+                        &mut env,
+                        Self::run_dispatch,
+                    );
                     continue;
                 }
             }

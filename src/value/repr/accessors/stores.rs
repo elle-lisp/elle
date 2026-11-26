@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! The accessors of the mutable containers: a read guard or a copy-out for each, and the stores themselves inside `value/`.
 //!
 //! docs/impl/mutable.md
@@ -58,10 +58,22 @@ impl Value {
     /// The elements of an array or an `@array`, copied. `None` for every other
     /// value.
     pub fn array_to_vec(&self) -> Option<Vec<Value>> {
+        let mut elements = Vec::new();
+        self.array_into(&mut elements).then_some(elements)
+    }
+
+    /// Append the elements of an array or an `@array` to `out`, and answer
+    /// whether `self` is one. Copies into a buffer the caller keeps, so a
+    /// warm buffer allocates nothing (docs/impl/spares.md).
+    pub fn array_into(&self, out: &mut Vec<Value>) -> bool {
         match self.array_mut_read() {
-            Some(read) => Some(read.to_vec()),
-            None => self.as_array().map(<[Value]>::to_vec),
+            Some(read) => out.extend_from_slice(&read),
+            None => match self.as_array() {
+                Some(elements) => out.extend_from_slice(elements),
+                None => return false,
+            },
         }
+        true
     }
 
     /// The entries of a struct or an `@struct` in key order, copied. `None`

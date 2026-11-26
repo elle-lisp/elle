@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The tail-call JIT entry point: a native, parameter or collection callee answers it, and a closure leaves for the trampoline.
 //!
 //! docs/impl/jit.md
@@ -127,9 +127,9 @@ pub(super) fn jit_tail_call_inner(
         // call whose callee mints its own (docs/impl/jit.md). The late mints
         // come ahead of it, as there.
         let late = handoff.late.mint(unsafe { &mut *vm.heap_ptr }, &args);
-        let Some(tail) = vm.pending_tail_call_to(func, closure, args, spliced_args) else {
+        let Some(tail) = vm.pending_tail_call_to(func, closure, &args, spliced_args) else {
             // Bad keyword args — the error is on the fiber, and no callee runs.
-            late.unmint(unsafe { &mut *vm.heap_ptr });
+            late.unmint(unsafe { &mut *vm.heap_ptr }, &args);
             return JitValue::nil();
         };
         late.keep();
