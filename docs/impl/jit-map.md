@@ -1,6 +1,6 @@
 # The JIT code map
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-26 -->
 
 A table of every compiled function's entry address and name, for perf and for a reader of a native stack.
 
@@ -78,6 +78,12 @@ of its own name, so a second profile does not overwrite the first, and
 make perf FILE=demos/fib/fib.lisp       # records target/perf-fib.data
 make hotspot FILE=demos/fib/fib.lisp    # the same, then opens it in hotspot
 ```
+
+The perf build carries no embedded blob, so a start that finds no warm-cache
+image compiles core.lisp, prelude.lisp and stdlib.lisp, then stores one
+([booting from an image](image/boot.md)). The recipe starts the perf build once
+before it records. The recorded start then hydrates that image, and the
+profile charges its boot a hydration rather than a compile.
 
 Tests: [frames.rs](../../src/jit/compiler/tests/frames.rs) for the JIT's
 frames, and [perf_target.rs](../../tests/integration/perf_target.rs) for the
