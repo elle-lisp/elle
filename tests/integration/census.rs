@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 // The post-boot heap census: the regression net for the image design's
 // sealing claims.
 //
@@ -13,17 +13,10 @@
 // variant enters the boot graph, which is exactly the condition that would
 // make the boot image undumpable.
 
-use elle::compiler::stdlib_cache::StdlibCache;
 use elle::runtime::Runtime;
 use elle::value::fiberheap::census::Sealing;
 use elle::value::HeapTag;
 use std::process::Command;
-
-/// A runtime booted from core.lisp, prelude.lisp and stdlib.lisp, whatever
-/// the process's boot-image policy.
-fn source_boot() -> Runtime {
-    Runtime::with_stdlib_cache(StdlibCache::Process)
-}
 
 // ── The sealing net ─────────────────────────────────────────────────
 
@@ -39,7 +32,7 @@ fn source_boot() -> Runtime {
 // this assertion is what fails instead.
 #[test]
 fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
-    let mut rt = source_boot();
+    let mut rt = Runtime::from_source();
     let census = rt.heap().census();
 
     let mut unsealed: Vec<String> = census
@@ -61,7 +54,7 @@ fn boot_heap_unsealed_leaves_are_exactly_the_reconstructible_set() {
 // the letrec lowering changed shape and the snapping design step is stale.
 #[test]
 fn boot_heap_holds_capture_cells_for_snapping() {
-    let mut rt = source_boot();
+    let mut rt = Runtime::from_source();
     let census = rt.heap().census();
     assert!(
         census.capture_cells > 0,
@@ -75,7 +68,7 @@ fn boot_heap_holds_capture_cells_for_snapping() {
 // many per-cell letrec regions the design's compaction argument rests on.
 #[test]
 fn boot_census_reports_the_expected_shape() {
-    let mut rt = source_boot();
+    let mut rt = Runtime::from_source();
     let census = rt.heap().census();
 
     assert!(census.objects > 0, "empty boot census");

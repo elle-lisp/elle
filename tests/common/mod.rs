@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! Shared test helpers: the evals, the cached evals property tests use, and scratch directories and their files.
 //!
 //! tests/AGENTS.md
@@ -18,7 +18,7 @@
 //! resolves through the VM sees its own instance's state. Instances share only
 //! the on-disk caches they boot from.
 
-use elle::runtime::{BootCaches, Runtime, RuntimeCore};
+use elle::runtime::{Runtime, RuntimeCore};
 use elle::{compile_file, eval_all, Value};
 
 pub mod documents;
@@ -164,7 +164,7 @@ fn eval_with_cache(
         // one hydrates (docs/impl/image/boot.md).
         let core = borrow.get_or_insert_with(|| {
             if with_stdlib {
-                RuntimeCore::with_caches(BootCaches::process())
+                RuntimeCore::with_boot_image(elle::config::get().boot_image())
             } else {
                 RuntimeCore::bare()
             }

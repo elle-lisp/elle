@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 //! A closure crosses the send boundary with its LIR, closure-valued constants, frame release tables, rest-list layout and body fragment.
 //!
 //! docs/threads.md
@@ -179,8 +179,8 @@ fn closure_round_trips_preserving_its_rest_list_layout() {
     // The layout is the gate's verdict on the closure's own body
     // (docs/impl/region/restlist.md). A worker that reconstructs it at the
     // default runs correctly and claims a page per rest argument, so only the
-    // field itself shows the loss. The child's code object crosses by the
-    // path the stdlib cache also takes.
+    // field itself shows the loss. The child's code object crosses in its
+    // parent's child table.
     use crate::value::RestListLayout;
     crate::value::arena::with_test_region(|| {
         let heap_ptr = crate::value::arena::leaked_test_heap();

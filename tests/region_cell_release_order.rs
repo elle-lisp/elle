@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-25
 //! An env cell's box must outlive every release routed through that cell.
 //!
 //! A captured `def` owes two releases at one env index: the init value's, which
@@ -34,12 +34,7 @@ fn run(source: &str) -> String {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_compile_ctx(&mut cctx as *mut elle::pipeline::CompileCtx);
     vm.set_symbols(&mut symbols as *mut SymbolTable);
-    init_stdlib(
-        &mut vm,
-        &mut symbols,
-        &mut cctx,
-        &elle::compiler::stdlib_cache::StdlibCache::Off,
-    );
+    init_stdlib(&mut vm, &mut symbols, &mut cctx);
     match elle::eval_all(source, &mut symbols, &mut vm, &mut cctx, "<cell-release>") {
         Ok(v) => format!("{}", v.display_with(Some(&symbols))),
         Err(e) => format!("error: {e}"),

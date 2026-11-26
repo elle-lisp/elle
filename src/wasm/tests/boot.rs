@@ -1,12 +1,10 @@
-// audited: 2026-10-20
+// audited: 2026-11-25
 //! The host runtime a full-module run boots, and the boot image it hydrates.
 //!
 //! docs/impl/image/boot.md
 //! docs/impl/wasm.md
 
-use crate::compiler::stdlib_cache::StdlibCache;
 use crate::image::boot::{BootImage, BootSource};
-use crate::runtime::BootCaches;
 
 /// The host runtime boots as `elle` does: over an empty directory it compiles
 /// and stores, and the next boot hydrates what it stored. The counter-factual
@@ -18,17 +16,14 @@ use crate::runtime::BootCaches;
 #[test]
 fn the_host_runtime_hydrates_the_image_a_host_runtime_stored() {
     let dir = tempfile::tempdir().expect("a scratch directory");
-    let caches = || BootCaches {
-        stdlib: StdlibCache::Off,
-        image: BootImage::Dir(dir.path().to_path_buf()),
-    };
+    let image = || BootImage::Dir(dir.path().to_path_buf());
     assert_eq!(
-        super::super::host_boot_source(true, caches()),
+        super::super::host_boot_source(true, image()),
         BootSource::Compiled,
         "the first boot found an image in an empty directory"
     );
     assert_eq!(
-        super::super::host_boot_source(true, caches()),
+        super::super::host_boot_source(true, image()),
         BootSource::Image,
         "the second boot did not hydrate the image the first stored"
     );

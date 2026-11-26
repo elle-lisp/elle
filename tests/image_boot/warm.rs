@@ -1,26 +1,21 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 // The warm cache: what a boot stores, under which name, what the next boot
 // reads, and what a store leaves behind.
 // docs/impl/image/boot.md
 // docs/impl/image/pins.md
 
 use super::*;
-use elle::compiler::stdlib_cache::StdlibCache;
 use elle::image::boot::{self, BootImage, BootSource};
-use elle::runtime::BootCaches;
 
 /// The warm-cache policy a test over `dir` boots under.
 fn policy_in(dir: &std::path::Path) -> BootImage {
     BootImage::Dir(dir.join("boot"))
 }
 
-/// A runtime whose boot image lives in `dir` and whose compiled stdlib is
-/// cached beside it, so the only files it can hit are this test's.
+/// A runtime whose boot image lives in `dir`, so the only files it can hit are
+/// this test's.
 fn runtime_in(dir: &std::path::Path) -> Runtime {
-    Runtime::with_caches(BootCaches {
-        stdlib: StdlibCache::Dir(dir.join("stdlib")),
-        image: policy_in(dir),
-    })
+    Runtime::with_boot_image(policy_in(dir))
 }
 
 /// Every `.image` file in `dir`'s boot directory, sorted.

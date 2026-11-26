@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 // docs/impl/jit.md
 // The JIT integration corpus: hand-built LIR compiled to native code, run, and
 // held to the answer the interpreter gives.
@@ -56,12 +56,7 @@ fn stdlib_cctx(
 ) -> elle::pipeline::CompileCtx {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut elle::symbol::SymbolTable);
-    elle::init_stdlib(
-        vm,
-        symbols,
-        &mut cctx,
-        &elle::compiler::stdlib_cache::StdlibCache::Off,
-    );
+    elle::init_stdlib(vm, symbols, &mut cctx);
     cctx
 }
 

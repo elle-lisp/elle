@@ -1,12 +1,11 @@
-// audited: 2026-10-26
+// audited: 2026-11-25
 //! What a boot image carries that only this crate can see, and compile parity under either boot.
 //!
 //! docs/impl/image/boot.md
 
 use std::collections::BTreeSet;
 
-use crate::compiler::stdlib_cache::StdlibCache;
-use crate::runtime::{BootCaches, Runtime};
+use crate::runtime::Runtime;
 use crate::scratch::ScratchDir;
 
 use super::{BootImage, BootSource};
@@ -16,12 +15,9 @@ fn boot_scratch(tag: &str) -> ScratchDir {
     ScratchDir::new(&format!("boot-{tag}"))
 }
 
-/// The stdlib cache and the boot image cache, both inside `scratch`.
-fn caches(scratch: &ScratchDir) -> BootCaches {
-    BootCaches {
-        stdlib: StdlibCache::Dir(scratch.join("stdlib")),
-        image: BootImage::Dir(scratch.join("boot")),
-    }
+/// The boot image cache inside `scratch`.
+fn image(scratch: &ScratchDir) -> BootImage {
+    BootImage::Dir(scratch.join("boot"))
 }
 
 /// Each macro this instance holds, with whether its transformer cache is
@@ -49,7 +45,7 @@ fn macro_shape(rt: &mut Runtime) -> BTreeSet<(String, bool)> {
 #[test]
 fn the_macro_table_crosses_with_its_filled_transformers() {
     let scratch = boot_scratch("macros");
-    let mut source = Runtime::with_caches(caches(&scratch));
+    let mut source = Runtime::with_boot_image(image(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     let before = macro_shape(&mut source);
     assert!(
@@ -62,7 +58,7 @@ fn the_macro_table_crosses_with_its_filled_transformers() {
     );
     drop(source);
 
-    let mut hydrated = Runtime::with_caches(caches(&scratch));
+    let mut hydrated = Runtime::with_boot_image(image(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert_eq!(
         macro_shape(&mut hydrated),
@@ -84,12 +80,12 @@ fn an_image_boot_expands_a_unit_as_a_source_boot_does() {
 
     let scratch = boot_scratch("units");
     let minted = {
-        let mut source = Runtime::with_caches(caches(&scratch));
+        let mut source = Runtime::with_boot_image(image(&scratch));
         assert_eq!(source.boot_source(), BootSource::Compiled);
         run_file(&mut source, FILE_UNIT, "unit.lisp")
     };
 
-    let mut rt = Runtime::with_caches(caches(&scratch));
+    let mut rt = Runtime::with_boot_image(image(&scratch));
     assert_eq!(rt.boot_source(), BootSource::Image);
     assert_eq!(
         run_file(&mut rt, FILE_UNIT, "unit.lisp"),
@@ -147,7 +143,7 @@ fn inc_promotes(rt: &mut Runtime) -> bool {
 #[test]
 fn a_hot_stdlib_function_compiles_on_the_jit_under_either_boot() {
     let scratch = boot_scratch("tier");
-    let mut source = Runtime::with_caches(caches(&scratch));
+    let mut source = Runtime::with_boot_image(image(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     assert!(
         inc_promotes(&mut source),
@@ -155,7 +151,7 @@ fn a_hot_stdlib_function_compiles_on_the_jit_under_either_boot() {
     );
     drop(source);
 
-    let mut hydrated = Runtime::with_caches(caches(&scratch));
+    let mut hydrated = Runtime::with_boot_image(image(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert!(
         inc_promotes(&mut hydrated),
@@ -185,7 +181,7 @@ fn plus_calls(rt: &mut Runtime, src: &str) -> usize {
 #[test]
 fn a_call_to_a_stdlib_function_grafts_under_either_boot() {
     let scratch = boot_scratch("graft");
-    let mut source = Runtime::with_caches(caches(&scratch));
+    let mut source = Runtime::with_boot_image(image(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     assert_eq!(
         plus_calls(&mut source, GRAFTS_PLUS),
@@ -194,7 +190,7 @@ fn a_call_to_a_stdlib_function_grafts_under_either_boot() {
     );
     drop(source);
 
-    let mut hydrated = Runtime::with_caches(caches(&scratch));
+    let mut hydrated = Runtime::with_boot_image(image(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert_eq!(
         plus_calls(&mut hydrated, GRAFTS_PLUS),
@@ -239,7 +235,7 @@ fn instruction_streams(rt: &mut Runtime, src: &str) -> Vec<(Vec<String>, usize)>
 #[test]
 fn the_two_boots_emit_one_bytecode_for_a_user_file() {
     let scratch = boot_scratch("parity");
-    let mut source = Runtime::with_caches(caches(&scratch));
+    let mut source = Runtime::with_boot_image(image(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     let compiled = instruction_streams(&mut source, GRAFTS_PLUS);
     drop(source);
@@ -255,7 +251,7 @@ fn the_two_boots_emit_one_bytecode_for_a_user_file() {
     );
     drop(ungrafted);
 
-    let mut hydrated = Runtime::with_caches(caches(&scratch));
+    let mut hydrated = Runtime::with_boot_image(image(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert_eq!(
         instruction_streams(&mut hydrated, GRAFTS_PLUS),

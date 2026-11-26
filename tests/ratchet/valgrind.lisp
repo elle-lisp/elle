@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-21
+(elle/epoch 18)
+# audited: 2026-11-25
 # Four programs under memcheck on both stdlib paths: lost bytes and error
 # contexts, read against the rows of tests/ledger/valgrind.lisp.
 #
@@ -29,19 +29,19 @@
 # body. A function nothing calls is never compiled, so `jit?` would answer false.
 (def programs
   [{:compiled "boot and exit, stdlib compiled"
-    :cached "boot and exit, stdlib cached"
+    :hydrated "boot and exit, stdlib hydrated"
     :flags []
     :source "(+ 1 2)"}
    {:compiled "a fiber yields and resumes, stdlib compiled"
-    :cached "a fiber yields and resumes, stdlib cached"
+    :hydrated "a fiber yields and resumes, stdlib hydrated"
     :flags []
     :source "(def f (fiber/new (fn [] (yield 1) 2) :yield)) (assert (= (resume f) 1) \"the fiber yields 1\") (assert (= (resume f) 2) \"and ends with 2\")"}
    {:compiled "a file read through the I/O backend, stdlib compiled"
-    :cached "a file read through the I/O backend, stdlib cached"
+    :hydrated "a file read through the I/O backend, stdlib hydrated"
     :flags []
     :source "(assert (> (length (slurp \"Cargo.toml\")) 0) \"the file has bytes\")"}
    {:compiled "a function the JIT compiles, stdlib compiled"
-    :cached "a function the JIT compiles, stdlib cached"
+    :hydrated "a function the JIT compiles, stdlib hydrated"
     :flags ["--trace=syncjit"]
     :source "(defn step [x n] (if (= n 0) x (step (+ x 1) (- n 1)))) (def @acc 0) (repeat 100 (assign acc (step acc 1))) (assert (jit? step) \"the JIT compiled step\")"}])
 
@@ -83,36 +83,42 @@
                    {:stdin :null :stdout :null}))
 
 (defn measure [dir]
-  "Fill DIR's cache with one unmeasured run, then read every program on both
-   paths."
-  (def cached [(string "--cache=" dir) "--boot-image=off"])
-  # The cached path loads the file this run writes. Without the file, every
-  # cached run would compile the standard library and read the compiled
-  # path's sites under the cached path's subjects.
-  (let [warm (subprocess/system (elle/executable) (concat cached ["-e" "nil"]))]
+  "Store a boot image in DIR with one unmeasured run, then read every program
+   on both paths."
+  # `--boot-image=DIR` reads the warm cache in DIR and never the blob a release
+  # rig carries, so the hydrated path reads the image this run stores.
+  (def warm-cache [(string "--boot-image=" dir)])
+  (let [warm (subprocess/system (elle/executable)
+                                (concat warm-cache ["-e" "nil"]))]
     (assert (= (get warm :exit) 0)
             (string "the unmeasured run exits 0\n" (get warm :stderr))))
-  (assert (not (empty? (file/ls (path/join dir "stdlib-cache"))))
-          "the unmeasured run wrote the standard library to the cache")
+  (assert (any? (fn [n] (string/ends-with? n ".image")) (file/ls dir))
+          "the unmeasured run stored a boot image")
   # [the key of a program's subject on the path, its boot flags]. `--cache=`
-  # with no directory turns both disk caches off, and `--boot-image=off` turns
-  # off the blob a release rig carries, so the compiled path compiles. The
-  # cached path turns the boot image off too, because a start that hydrates
-  # one reads no stdlib cache.
-  (def paths [[:compiled ["--cache=" "--boot-image=off"]] [:cached cached]])
+  # with no directory turns the disk caches off, and `--boot-image=off` turns
+  # off the blob a release rig carries, so the compiled path compiles. A
+  # hydrated run traces its boot, so the mark below proves it hydrated.
+  (def paths
+    [[:compiled ["--cache=" "--boot-image=off"]]
+     [:hydrated [;warm-cache "--trace=boot"]]])
   # Every run starts before any is read, so the producer costs about one run.
   (def @children @[])
   (each [path boot] in paths
     (each program in programs
       (push children
-            [(get program path)
+            [path (get program path)
              (start boot (get program :flags) (get program :source))])))
-  (each [subject child] in children
+  (each [path subject child] in children
     (let [report (string (port/read-all (get child :stderr)))
           code (subprocess/wait child)
           lines (string/split report "\n")]
       (assert (= code 0)
               (string subject ": the program exits 0 under memcheck\n" report))
+      # Without the mark, a hydrated run that compiled would read the compiled
+      # path's sites under the hydrated path's subjects.
+      (when (= path :hydrated)
+        (assert (line-with lines "image-hydrate")
+                (string subject ": the run hydrated no image\n" report)))
       (r:read subject :definitely-lost (lost-bytes lines) :unit "bytes")
       (r:read subject :error-contexts (error-contexts lines) :unit "contexts"))))
 

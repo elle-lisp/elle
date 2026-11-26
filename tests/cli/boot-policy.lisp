@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-25
 ## `--boot-image=` at the command line: where the default stores, which flags turn it off, and which commands read it.
 ## tests/cli/overview.md
 ## docs/impl/image/boot.md
@@ -91,16 +91,13 @@
             "dump-boot's runtime used the warm cache"))
 
   # The language server boots as `elle` does: over a cold cache it hydrates
-  # the blob a binary carries, or compiles and stores an image, and it writes
-  # no stdlib cache either way. The counter-factual loads the stdlib through
-  # `init_stdlib` under the process cache: a stdlib cache and no image. Its
-  # standard input is closed, so it exits once it booted.
-  (eprintln "scenario: the language server boots as elle does and writes no stdlib cache")
+  # the blob a binary carries, or compiles and stores an image. The
+  # counter-factual loads the stdlib through `init_stdlib`, which stores no
+  # image. Its standard input is closed, so it exits once it booted.
+  (eprintln "scenario: the language server boots as elle does")
   (let [d (case-dir "lsp")]
     (start ["lsp"] :env (put (sys/env) "ELLE_CACHE" d))
     (assert (= (images d) (if blob? 0 1))
-            (string "the language server stored " (images d) " images"))
-    (assert (not (file-exists? (path/join d "stdlib-cache")))
-            "the language server wrote a stdlib cache")))
+            (string "the language server stored " (images d) " images"))))
 
 (eprintln "all boot-policy scenarios passed")

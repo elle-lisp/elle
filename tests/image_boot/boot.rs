@@ -1,21 +1,16 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 // The boot configuration end to end: an image dumped from a booted instance,
 // and a fresh instance that answers out of it.
 // docs/impl/image/boot.md
 // docs/impl/image/pins.md
 
 use super::*;
-use elle::compiler::stdlib_cache::StdlibCache;
 use elle::image::boot::{self, BootImage, BootSource};
-use elle::runtime::BootCaches;
 
-/// A runtime whose boot image and compiled stdlib both live under `dir`, so
-/// the only files it can hit are the ones this test wrote.
+/// A runtime whose boot image lives under `dir`, so the only image it can hit
+/// is the one this test wrote.
 fn runtime_in(dir: &std::path::Path) -> Runtime {
-    Runtime::with_caches(BootCaches {
-        stdlib: StdlibCache::Dir(dir.join("stdlib")),
-        image: BootImage::Dir(dir.join("boot")),
-    })
+    Runtime::with_boot_image(BootImage::Dir(dir.join("boot")))
 }
 
 /// Leave a boot image in `dir`: one source boot, which stores the image every
@@ -80,11 +75,10 @@ fn an_image_booted_instance_answers_as_a_source_booted_one() {
 // A fresh instance answers `meta/origin` for a hydrated stdlib closure with
 // the file it was written in, out of the image's tables.
 //
-// The counter-factual is the stdlib disk cache beside it, which drops the
-// defining span outright (docs/impl/stdlib-cache.md): a cache-hit boot answers
-// nil here. So this assertion distinguishes an image boot from the other
-// skip-the-front-end path, and it exercises the file table at boot scale,
-// where every span in the library names one file.
+// The counter-factual is a hydration that drops the defining span, as a
+// closure rebuilt through the send codec does: it answers nil here. The
+// assertion also exercises the file table at boot scale, where every span in
+// the library names one file.
 #[test]
 fn a_hydrated_stdlib_closure_reports_where_it_was_written() {
     let dir = crate::common::ScratchDir::new("image-boot-origin");

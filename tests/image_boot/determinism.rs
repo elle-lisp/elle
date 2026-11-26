@@ -1,11 +1,10 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 // A boot dump is deterministic: two dumps of one boot state, and two dumps
 // with a compile between them, each write one file.
 // docs/impl/image/boot.md
 // docs/impl/image/pins.md
 
 use super::*;
-use elle::compiler::stdlib_cache::StdlibCache;
 
 // Two dumps of one boot state write one file. This is determinism at the scale
 // where a code payload's padding can leak: every closure template of the
@@ -17,12 +16,10 @@ fn two_dumps_of_one_boot_state_write_one_file() {
     let a = dir.join("a.image");
     let b = dir.join("b.image");
 
-    // The stdlib is compiled rather than read from its disk cache: a cache hit
-    // rebuilds the library's closures through the send codec, whose capture
-    // cells record no binding, and the dump refuses one of those
-    // (docs/impl/image/boot.md). With `Runtime::new()` here the verdict would
-    // move with the state of a file no assertion below names.
-    let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
+    // A source boot, so the state both dumps read is the one this process
+    // compiled. With `Runtime::new()` here it would be whatever image the blob
+    // or the warm cache held.
+    let mut rt = Runtime::from_source();
     paint_stack(0xAA, 16);
     rt.dump_boot_image(&a).expect("dump a");
     paint_stack(0x55, 16);
@@ -50,7 +47,7 @@ fn a_compile_between_two_boot_dumps_changes_neither_file() {
     let a = dir.join("a.image");
     let b = dir.join("b.image");
 
-    let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
+    let mut rt = Runtime::from_source();
     rt.dump_boot_image(&a).expect("dump a");
     let answer = eval(&mut rt, "(length (map (fn [x] (+ x 1)) [1 2 3]))");
     assert_eq!(

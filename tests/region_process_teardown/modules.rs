@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! The residue gates of a run that loads a module, by a loader's direct call or by an import.
 //!
 //! docs/impl/region/rules.md
@@ -6,21 +6,16 @@
 
 use super::census::{residue_after_teardown, HandOff};
 use super::*;
-use elle::compiler::stdlib_cache::StdlibCache;
 
 /// Run `src` on a fresh runtime, and require that teardown leaves no region,
 /// and no reference the region graph cannot explain.
 fn assert_no_residue(src: &str) {
     assert_eq!(
-        residue_after_teardown(
-            Runtime::with_stdlib_cache(StdlibCache::Off),
-            src,
-            HandOff::Root
-        ),
+        residue_after_teardown(Runtime::from_source(), src, HandOff::Root),
         0,
         "{src}: regions survived teardown",
     );
-    let pinned = pinned_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src);
+    let pinned = pinned_after_teardown(Runtime::from_source(), src);
     assert!(
         pinned.is_empty(),
         "{src}: regions pinned from outside the region graph: {pinned:#?}"
