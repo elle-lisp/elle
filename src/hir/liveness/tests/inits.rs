@@ -1,5 +1,5 @@
-// audited: 2026-11-25
-//! Pins where the forms inside a let or letrec init die: at the init, which the binding's reads extend, or at a loop it reads across, unless an assign writes what it reads.
+// audited: 2026-11-26
+//! Pins where a let or letrec init's forms die: at the init, which the binding's reads extend, or at a loop it reads an unassigned name across.
 //!
 //! docs/impl/region/lastuse.md
 
