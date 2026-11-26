@@ -1,6 +1,6 @@
 # Booting from an image
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-26 -->
 
 What the boot configuration carries, how `elle image dump-boot` writes it, and
 how a fresh instance starts from it.
@@ -202,10 +202,10 @@ shared between them through the page cache.
 - A parent that compiled and then stored an image hands its workers the file
   it stored, so the workers of a cold start hydrate too.
 - A parent with no image to hand on has workers that compile, through the
-  parent's stdlib cache. That parent booted with `--no-stdlib` or through
-  `Runtime::with_stdlib_cache`, or its store failed. A worker never reads the
-  process policy itself, so it never boots from an image its parent did not
-  hold.
+  parent's stdlib cache. That parent booted with `--boot-image=off` or
+  `--no-stdlib`, or through `Runtime::with_stdlib_cache`, or its store failed.
+  A worker never reads the process policy itself, so it never boots from an
+  image its parent did not hold.
 - A worker never stores. Its parent already holds the image a store would
   write.
 - A worker whose hydration refuses the image reports the refusal and compiles.
@@ -235,12 +235,11 @@ cannot hydrate. An embedder that wants the image boots through `Runtime`.
 
 ## The gate
 
-`make smoke-boot-image` runs the corpus from the warm cache instead of from the
-three sources. The target fills a cache directory, proves that the next start
-hydrates what it stored, and then runs the corpus with every `elle test` batch
-pointed at that directory. A pull request gets the same run from the `Boot
-Image Tests` job ([CI](../../analysis/ci.md)). The other corpus jobs run
-release binaries that carry a blob, so they run the corpus from the blob.
+Every other suite pass boots from an image. A release binary hydrates its blob,
+and a variant or debug build hydrates the warm cache its first start stores.
+The source boot is what `elle image dump-boot` compiles before it writes the
+blob. `make smoke-source-boot` is its gate, and a pull request gets the same run
+from the `Source Boot Tests` job ([CI](../../analysis/ci.md)).
 
 The target runs `make bytecode-parity` first, the compile half of
 [parity](parity.md). It writes every corpus file's
@@ -257,15 +256,22 @@ context records the counter where the boot ends, as it installs the stdlib
 exports, and the boot dump writes that mark. So the watermark is the counter a
 source boot hands its first user compile, however late the dump runs.
 
-The proof is a `--trace=boot` start that has to print an `image-hydrate` mark.
-Without it the target reports on a source boot: a binary that ignored
-`--boot-image=` would pass it, and so would an image every start refuses and
-replaces. The parity target asks for the same mark, or it would compare two
-source boots.
+The parity target stores an image in a warm-cache directory of its own. It
+compares nothing until a `--trace=boot` start prints an `image-hydrate` mark,
+or it would compare two source boots, which always agree. The mark also proves
+that the warm cache hydrates, and every variant build boots from it.
 
-The runner instance hydrates, and so does every worker it spawns to run a
-file's forms (§ A worker boots as its parent did). So every corpus file is
-read, expanded, compiled and run against the image's macros and exports.
+Next, a `--trace=boot` start under `--boot-image=off` has to print a `prelude`
+mark, and no `image-hydrate` or `blob-map` mark. A binary that ignored the flag
+would hydrate its blob and pass the suite, and the gate would report a source
+boot that never happened.
+
+Last, the target runs the language suite with `--boot-image=off`, inside the
+runner as `smoke-lang` runs it. The runner's instance compiles core.lisp and
+the prelude, and reads its stdlib through the stdlib cache. Its workers hold no
+image to inherit, so each one boots the same way (§ A worker boots as its
+parent did). So every corpus file runs against the macros and exports a source
+boot made.
 
 ## What the default reads
 
