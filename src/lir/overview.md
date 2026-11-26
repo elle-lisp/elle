@@ -1,6 +1,6 @@
 # LIR
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-26 -->
 
 The LIR module's types, how a reader walks a frozen function, and the rules every block and register keeps.
 
@@ -43,7 +43,7 @@ The frozen form, which every other reader reads ([code/](code/mod.rs)):
 | `FrozenModule` | The lowerer's product: an entry function and its closures, which `MakeClosure` names by `ClosureId`, each a `LirOwned` |
 | `Op` | One opcode byte per `InstrRef` variant |
 | `Node`, `BlockRec`, `ConstRec`, `SiteRec` | The plain records a frozen function is made of |
-| `LirCode` | The records, tables and header in `Vec`s: `Send`, and serializable |
+| `LirCode` | The records, tables and header in `Vec`s: plain data, and `Send` |
 | `LirOwned` | A `LirCode` plus the `Value`s its `ValueConst` instructions load |
 | `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
 | `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |

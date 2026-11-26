@@ -1,6 +1,6 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-26 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
@@ -140,11 +140,11 @@ process.
 A frozen function has two homes, and both hold the same records:
 
 - **`LirCode`** holds the records, the tables and the function's header in
-  `Vec`s. It is plain data: `Send`, and serializable with serde. It carries
+  `Vec`s. It is plain data and `Send`, and it has no byte form. It carries
   the docstring, the origin, the body fragment and the capture record for the
-  payload, and skips all four when it serializes, because the payload holds
-  them and the JIT reads none. It also skips the binding each slot holds,
-  which only [the data form](../spec/form.md) reads.
+  payload, and the binding each slot holds, which only
+  [the data form](../spec/form.md) reads. A copy out of a payload drops the
+  slot bindings, because no payload holds them.
   **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`.
   `finish_function` produces one per function, and a `JitTask` holds one.
 - **`LirBody`** holds them in region pages, as the `lir` field of a code
