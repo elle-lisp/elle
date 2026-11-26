@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-26
 //! What the solo-compilation gate accepts and rejects, what its compiled entry
 //! records, whether Cranelift verifies it, and the frame it opens.
 //!
@@ -258,4 +258,21 @@ fn compile_records_entry_in_code_address_registry() {
         .find(|(addr, _)| *addr == entry)
         .map(|(_, name)| name);
     assert_eq!(name.as_deref(), Some("registry-probe-solo"));
+}
+
+/// The counter-factual is a compile that records the LIR's declared name: two
+/// helpers called `go` would share one label, and perf one frame.
+#[test]
+fn a_labeled_compile_records_its_label_in_place_of_the_name() {
+    let lir = simple_fixture(Arity::Exact(1)).name("go").build();
+    let code = verified()
+        .labeled("go@probe.lisp:3:5".to_string())
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("Failed to compile");
+    let entry = code.fn_ptr() as usize;
+    let name = crate::jit::registry::snapshot()
+        .into_iter()
+        .find(|(addr, _)| *addr == entry)
+        .map(|(_, name)| name);
+    assert_eq!(name.as_deref(), Some("go@probe.lisp:3:5"));
 }

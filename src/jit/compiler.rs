@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-26
 // docs/impl/jit.md
 // docs/impl/verifier.md
 //! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
@@ -120,6 +120,13 @@ impl JitCompiler {
     /// Stop this compile with `JitError::Abandoned` once `abandon` is set.
     pub(crate) fn abandoned_by(mut self, abandon: Abandon) -> Self {
         self.abandon = abandon;
+        self
+    }
+
+    /// Declare the compiled function, and record its registry entry, under
+    /// `label` (docs/impl/jit-map.md).
+    #[allow(dead_code)]
+    pub(crate) fn labeled(self, _label: String) -> Self {
         self
     }
 
