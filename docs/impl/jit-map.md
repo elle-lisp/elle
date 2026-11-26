@@ -13,16 +13,24 @@ that gap. Every successful compile, on every thread, records
 `(entry address, label)` in one process-global table
 ([registry.rs](../../src/jit/registry.rs)).
 
-The label is the function's declared name when one exists, else its
-smallest-offset source location (`ClosureTemplate::display_label`). Lowering
-names only a lambda a `def` or `let` binds, so the location is what identifies
-the rest to a reader. The table only grows; entries are never removed,
-because a stack captured at any time may reference code whose `JitCode` has
-since been dropped.
+The label is the function's declared name and the place it was written, as
+`name@file:line:col`, and a function with no declared name gets the place
+alone. The place is the origin `(meta/origin f)` reports. A function with no
+origin falls back to `ClosureTemplate::display_label`, the name or the
+smallest-offset source location.
+
+Lowering names a `fn` only when it initializes a `def` or `letrec` binding,
+and functions often share a name: the standard library binds many `letrec`
+helpers called `go`. perf merges samples by label, so the place keeps two such
+functions apart in a profile. The label names the compile alone. A rejection still reports the
+function's declared name.
+
+The table only grows; entries are never removed, because a stack captured at
+any time may reference code whose `JitCode` has since been dropped.
 
 ## Reading it
 
-`(vm/query "jit/map" nil)` renders the table as one `0x<addr> <name>` line per
+`(vm/query "jit/map" nil)` renders the table as one `0x<addr> <label>` line per
 entry, sorted by address. The test runner prints it after the thread
 photograph when a form misses its deadline ([deadline.lisp](../../src/test/deadline.lisp),
 `note-timeout-stacks`), so a sampled JIT frame resolves to the nearest
@@ -52,8 +60,9 @@ that parks every sample of a busy thread on ONE address is showing a
 single-instruction loop; on AArch64 the word `0x14000000` is `b .` — an
 unconditional branch to itself.
 
-Tests: [jit-registry.lisp](../../tests/impl/jit-registry.lisp) and the unit
-tests in [registry.rs](../../src/jit/registry.rs).
+Tests: [jit-registry.lisp](../../tests/impl/jit-registry.lisp), the unit
+tests in [registry.rs](../../src/jit/registry.rs), and the compiler's
+[tests](../../src/jit/compiler/tests/mod.rs).
 
 ## Profiling with perf
 
