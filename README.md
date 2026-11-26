@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-26 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -177,21 +177,22 @@ calls `free`.
 A value's region lives exactly as long as the value, so nothing needs a copy to
 outlive its maker. Copies are absent by construction, not elided by an
 optimizer. A store, a return and a yield all pass the same 16-byte `Value`,
-and the bytes stay in the pages where they were born:
+and the bytes stay in the pages where they were born. `arena/page-bytes`
+counts the bytes of every page the heap claims, so a copy shows in it:
 
 ```lisp
 (def blob (string/repeat "x" 100000))    # 100 KB, born in one region
 (def inbox @[])
 (def child (fiber/new (fn [] (emit :yield blob)) |:yield|))
 
-(def before (arena/bytes))
+(def before (arena/page-bytes))
 (push inbox blob)                        # a store into a container
 (fiber/resume child)                     # a yield out of another fiber
 (assert (= (fiber/value child) blob))
-(assert (< (- (arena/bytes) before) 1024))   # neither one copied the blob
+(assert (< (- (arena/page-bytes) before) 1024))   # neither one copied the blob
 
 (def copy (string blob "!"))             # a copy the program asks for
-(assert (> (- (arena/bytes) before) 100000))
+(assert (> (- (arena/page-bytes) before) 100000))
 ```
 
 I/O follows the same design. A read hands the kernel a buffer in the caller's
