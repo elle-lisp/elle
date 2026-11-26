@@ -22,8 +22,8 @@ smallest-offset source location.
 Lowering names a `fn` only when it initializes a `def` or `letrec` binding,
 and functions often share a name: the standard library binds many `letrec`
 helpers called `go`. perf merges samples by label, so the place keeps two such
-functions apart in a profile. The label names the compile alone. A rejection still reports the
-function's declared name.
+functions apart in a profile. The label names the compile alone. A rejection still reports
+`display_label`.
 
 The table only grows; entries are never removed, because a stack captured at
 any time may reference code whose `JitCode` has since been dropped.
