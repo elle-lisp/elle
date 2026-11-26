@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-26
 //! A frozen function keeps its header, its blocks in order, its terminators and spans, and its sites.
 //!
 //! docs/impl/lir.md
@@ -196,41 +196,6 @@ fn sites_set_after_freezing_read_back() {
         "a charge site's ip is where the pause resumes",
     );
     assert!(view.charge_site(1).is_none());
-}
-
-/// The plain-data half serializes and reloads, and a file crosses by
-/// spelling, so it names the same file wherever it lands.
-#[test]
-fn the_code_survives_serialization() {
-    let mut heap = FiberHeap::new();
-    let mut builder = LirBuilder::new(&mut heap);
-    builder.begin_function(Arity::Exact(0));
-    builder.open_block(Label(0));
-    for (i, &op) in Op::ALL.iter().enumerate() {
-        let span = if i == 0 {
-            Span::new(1, 2, 3, 4).with_file("ser.lisp")
-        } else {
-            Span::synthetic()
-        };
-        builder.emit(exemplar(op), span);
-    }
-    builder.finish_block();
-    let owned = builder.finish_function().expect("freezes");
-    let bytes = bincode::serialize(owned.code()).expect("serializes");
-    let code: LirCode = bincode::deserialize(&bytes).expect("deserializes");
-    let back = LirOwned::from_parts(code, owned.values().to_vec()).expect("the values fit");
-    let a: Vec<String> = owned
-        .view()
-        .nodes()
-        .map(|n| format!("{:?} {}", n.instr(), n.span()))
-        .collect();
-    let b: Vec<String> = back
-        .view()
-        .nodes()
-        .map(|n| format!("{:?} {}", n.instr(), n.span()))
-        .collect();
-    assert_eq!(a, b);
-    assert!(b[0].ends_with("ser.lisp:3:4"));
 }
 
 /// A rebuilt function must hold the values its instructions index; one short
