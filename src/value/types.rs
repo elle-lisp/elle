@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-26
 //! The value system's small standing types: symbol identity, arity, mutability,
 //! and the signature every primitive has.
 //!
@@ -65,7 +65,7 @@ impl fmt::Display for SymbolId {
 /// assert!(Arity::Exact(2).matches(2));
 /// assert!(!Arity::Exact(2).matches(1));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arity {
     /// Exact number of arguments required
     Exact(usize),

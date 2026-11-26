@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-26
 //! The LIR's scalar types: registers, labels, operators, terminators, and the site records emission produces.
 //!
 //! src/lir/overview.md
@@ -6,9 +6,7 @@
 
 /// Virtual register. `repr(transparent)`, so a frozen function's pool of `u32`
 /// words reads as a slice of registers without a copy.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Reg(pub u32);
 
@@ -16,7 +14,7 @@ pub struct Reg(pub u32);
 ///
 /// `MakeClosure` references closures by ID rather than owning them,
 /// so each closure is an independent compilation unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClosureId(pub u32);
 
 impl Reg {
@@ -26,7 +24,7 @@ impl Reg {
 }
 
 /// Basic block label
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Label(pub u32);
 
 impl Label {
@@ -36,7 +34,7 @@ impl Label {
 }
 
 /// Binary operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,
     Sub,
@@ -51,7 +49,7 @@ pub enum BinOp {
 }
 
 /// Unary operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
     Not,
@@ -59,7 +57,7 @@ pub enum UnaryOp {
 }
 
 /// Conversion operations (type coercion intrinsics)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConvOp {
     IntToFloat,
     FloatToInt,
@@ -71,7 +69,7 @@ pub enum ConvOp {
 /// (`src/hir/typeinfer/contract.rs`) and carried here by the lowerer. A backend
 /// spends it by dropping the tag test its generic path would run; see
 /// docs/impl/lir.md for what each one does with it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OperandProof {
     /// Nothing was proved. The operands can hold any value.
     #[default]
@@ -88,7 +86,7 @@ impl OperandProof {
 }
 
 /// Comparison operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmpOp {
     Eq,
     Ne,
@@ -99,7 +97,7 @@ pub enum CmpOp {
 }
 
 /// Block terminator - how control leaves a block
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Terminator {
     /// Return from function
     Return(Reg),
@@ -138,7 +136,7 @@ pub fn for_each_terminator_use(term: &Terminator, mut f: impl FnMut(Reg)) {
 /// Metadata about a yield point, collected during bytecode emission.
 /// The JIT reads this to know how to spill registers and where to
 /// resume in the interpreter.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct YieldPointInfo {
     /// Bytecode IP to resume at (the instruction after the Emit opcode).
     /// This is the IP stored in the SuspendedFrame so the interpreter
@@ -160,7 +158,7 @@ pub struct YieldPointInfo {
 /// SuspendedFrame a compiled frame parks as when a signal leaves it there.
 ///
 /// Only populated for functions where `signal.may_suspend()`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct CallSiteInfo {
     /// Bytecode IP after the instruction and its operands.
     /// This is the IP the interpreter would store in SuspendedFrame.ip
@@ -186,7 +184,7 @@ pub struct CallSiteInfo {
 /// instruction, which the interpreter then runs again (docs/impl/jit.md).
 ///
 /// Only populated for functions where `signal.may_suspend()`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ChargeSiteInfo {
     /// Bytecode offset where the charging instruction starts.
     pub ip: usize,
