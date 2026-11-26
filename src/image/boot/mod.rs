@@ -29,6 +29,9 @@ use super::ImageError;
 
 pub use blob::Blob;
 pub(crate) use cache::store;
+// The WASM module cache keys its entries on the binary as the boot cache does.
+#[cfg(feature = "wasm")]
+pub(crate) use cache::Executable;
 pub(crate) use open::OpenImage;
 
 /// The keys the root struct and a macro entry carry. Both halves name them —
