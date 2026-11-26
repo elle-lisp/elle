@@ -1,6 +1,6 @@
 # The tool producers
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-26 -->
 
 Producers that read the counts a tool takes over the tree, and report each
 count as a reading.
@@ -41,11 +41,14 @@ and runs each one on both paths a boot takes to the standard library:
 
 | Path | The flag | What the boot does |
 |------|----------|--------------------|
-| `stdlib compiled` | `--cache=` | compiles the standard library, because caching is off |
-| `stdlib cached` | `--cache=DIR`, a fresh directory | loads the standard library that one unmeasured run wrote to `DIR` |
+| `stdlib compiled` | `--cache= --boot-image=off` | compiles the standard library, because no image is read |
+| `stdlib hydrated` | `--boot-image=DIR`, a fresh directory | hydrates the boot image that one unmeasured run stored in `DIR` |
 
 A reading's subject joins the program and the path with a comma, for example
-`boot and exit, stdlib cached`. It reads two numbers from each run's report:
+`boot and exit, stdlib hydrated`. A hydrated run traces its boot, and the
+producer refuses one that prints no `image-hydrate` mark, which would read the
+compiled path's sites under the hydrated path's subjects. It reads two numbers
+from each run's report:
 
 | Axis | Unit | What memcheck counted |
 |------|------|-----------------------|
@@ -53,16 +56,16 @@ A reading's subject joins the program and the path with a comma, for example
 | `error-contexts` | contexts | the distinct sites of an error, a definite leak included |
 
 The two paths run different code, so each reads error sites the other does
-not. A run with no `--cache` flag uses the shared cache directory, and that
-directory holds the file of one binary at a time
-([stdlib-cache](../../docs/impl/stdlib-cache.md)). Its path, and so its
+not. A run with no flag hydrates the rig's blob, or the shared warm cache
+where the rig carries none, and that directory holds the image of one binary
+at a time ([boot.md](../../docs/impl/image/boot.md)). Its path, and so its
 reading, would turn on which binary ran last. The producer therefore names the
 path of every run, and its readings do not depend on what ran before it.
 
 The producer reads contexts, never the count of errors. One site can report
 any number of times, and that number follows the work the run did: a boot
 that compiles the standard library repeats its sites more often than one that
-loads it. A new error site raises the count of contexts, and a known site
+hydrates it. A new error site raises the count of contexts, and a known site
 repeated leaves it alone. `--trace=syncjit` compiles on the VM thread, so the
 JIT program's report does not depend on when a background compile lands.
 

@@ -167,8 +167,8 @@ builds it too. The profile is the dev profile with the workspace crates at
 `opt-level = 2`. Most of the Rust suite's time goes to the `elle` processes its
 tests start, and each one at `opt-level = 0` runs about ten times slower. The
 profile keeps debug assertions, so the region checks still run. Each test
-runtime and each process it starts caches its standard library under the
-runner's `HOME` ([config](../config.md)).
+runtime and each process it starts reads its boot image from the warm cache
+under the runner's `HOME` ([config](../config.md)).
 
 A release `make elle` embeds a boot image in the binaries it builds, so every
 corpus job's `elle` and `elle-rig` hydrate it at every start that does not

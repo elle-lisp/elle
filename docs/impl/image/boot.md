@@ -88,13 +88,6 @@ writes is the one those three sources produce. It never boots from an image
 itself: an artifact two hops from the sources it claims is one nobody can
 check by rebuilding it.
 
-The stdlib disk cache is off for that boot, and a warm-cache store compiles for
-the same reason. A cache hit rebuilds the library's closures through the send
-codec, which carries no cell's binding. So every restored capture cell reads as
-minted at run time, and the dump refuses one of those by variant
-([sealing.md](sealing.md)). A boot image therefore costs one stdlib compile per
-build and digest, paid by the start that stores it.
-
 The dump is the ordinary dumper over the root struct, so determinism, the
 refusals, and the cross-build name and primitive tables are the ones
 [dumping](dumping.md) and [sealing](sealing.md) already describe. The
@@ -157,18 +150,21 @@ boot hydrates it; when none is, boot compiles from source and dumps one for the
 next start.
 
 - The file is `<dir>/<key>.image`. `<key>` hashes the source digest the root
-  struct carries with the binary's identity, which is the length and
-  modification time of the executable, as the stdlib cache reads them
-  ([stdlib-cache.md](../stdlib-cache.md)).
+  struct carries with the binary's identity: the length and modification time
+  of the executable.
+- The identity names the build, not the version string. Two builds of one
+  version compile the boot sources differently once an emitter or a pass
+  changes, and the fingerprint sees only layout. A key blind to the rebuild
+  hands every instance the last binary's code, a test's instance included, so a
+  failure stops implicating the branch that caused it.
 - An image another build stored has another name, so this binary never opens
   it. A binary that cannot read its own identity reads and writes no image.
 - A fingerprint mismatch, a corrupt file and a missing file are one case:
   compile, then store, so a rejected file is replaced rather than rejected
   again by every later start.
 - The directory travels with the instance rather than coming from process
-  state, for the reason [the stdlib cache](../stdlib-cache.md) argues. The suite
-  builds many instances across threads, and a directory on the instance is what
-  keeps one test's cache invisible to the test beside it.
+  state. The suite builds many instances across threads, and a directory on the
+  instance is what keeps one test's cache invisible to the test beside it.
 - A store writes a temporary file in the same directory and renames it over the
   target. The temporary file's name is the store's alone, because two threads
   of one process can store one image at once. Never rewrite an image in place:
@@ -179,8 +175,8 @@ next start.
   megabytes apiece. A directory therefore holds one image whatever runs in it,
   and that bound is the reason for the rule. A rustdoc test, for example, runs
   from a fresh temporary executable every time, and each one stores an image.
-- Executables that share a directory evict each other, as they do in the stdlib
-  cache. `elle` and `elle-rig`, or a debug and a release build, then pay one
+- Executables that share a directory evict each other. `elle` and
+  `elle-rig`, or a debug and a release build, then pay one
   compile and one dump at each switch. Give them separate directories with
   `--boot-image=DIR` or `--cache=` when that matters.
 
@@ -201,9 +197,9 @@ shared between them through the page cache.
   file after the parent opened it therefore changes nothing a worker maps.
 - A parent that compiled and then stored an image hands its workers the file
   it stored, so the workers of a cold start hydrate too.
-- A parent with no image to hand on has workers that compile, through the
-  parent's stdlib cache. That parent booted with `--boot-image=off` or
-  `--no-stdlib`, or through `Runtime::with_stdlib_cache`, or its store failed.
+- A parent with no image to hand on has workers that compile. That parent
+  booted with `--boot-image=off` or `--no-stdlib`, or through
+  `Runtime::from_source`, or its store failed.
   A worker never reads the process policy itself, so it never boots from an
   image its parent did not hold.
 - A worker never stores. Its parent already holds the image a store would
@@ -267,10 +263,9 @@ would hydrate its blob and pass the suite, and the gate would report a source
 boot that never happened.
 
 Last, the target runs the language suite with `--boot-image=off`, inside the
-runner as `smoke-lang` runs it. The runner's instance compiles core.lisp and
-the prelude, and reads its stdlib through the stdlib cache. Its workers hold no
-image to inherit, so each one boots the same way (§ A worker boots as its
-parent did). So every corpus file runs against the macros and exports a source
+runner as `smoke-lang` runs it. The runner's instance compiles core.lisp, the
+prelude and stdlib.lisp. Its workers hold no image to inherit, so each one
+compiles too (§ A worker boots as its parent did). So every corpus file runs against the macros and exports a source
 boot made.
 
 ## What the default reads
@@ -286,12 +281,10 @@ The default reaches every `Runtime::new()`: `elle`, its REPL and its
 subcommands, and an embedder's runtime. It reaches the language server and the
 WASM entry's host runtime, and every worker of an instance that holds an image
 (§ A worker boots as its parent did). Four paths always boot from source:
-`--no-stdlib`, `elle image dump-boot` (§ Producing one),
-`Runtime::with_stdlib_cache`, which names the stdlib cache it reads, and
-`init_stdlib`.
+`--no-stdlib`, `elle image dump-boot` (§ Producing one), `Runtime::from_source`
+and `init_stdlib`.
 
 The default has two costs where no blob hydrates. A start that misses the warm
-cache compiles the three sources and skips the stdlib cache, because the store
-needs a compiled boot (§ Producing one). A process that declares a user signal
-before it boots cannot store at all, so it pays that compile at every start and
-reports the refused store.
+cache compiles the three sources before it stores. A process that declares a
+user signal before it boots cannot store at all, so it pays that compile at
+every start and reports the refused store.

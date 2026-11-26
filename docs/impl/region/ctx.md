@@ -1,6 +1,6 @@
 # NativeCtx — explicit allocation: every value names its region and heap
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-26 -->
 
 A native allocates only through a capability it is handed, which names its region.
 
@@ -81,9 +81,6 @@ impl<'h> Alloc<'h> {
     /// call boundaries that have no compiler-assigned result slot.
     pub(crate) fn new(heap: &'h mut FiberHeap) -> Self;
     pub(crate) fn boundary(heap: &'h mut FiberHeap) -> Self;
-    /// Mint a fresh region and register it as a process root — the constructor
-    /// for values a Rust holder keeps for the instance's life.
-    pub(crate) fn process_root(heap: &'h mut FiberHeap) -> Self;
     pub fn alloc(&self, obj: HeapObject) -> Value;
     pub fn alloc_slice<T: Copy + 'static>(&self, items: &[T]) -> RegionSlice<T>;
     // ergonomic constructors: ctx.string(s), ctx.pair(a, b), ctx.syntax(s), …
@@ -164,27 +161,6 @@ is the test: [region-io-completion-leak.lisp](../../../tests/impl/region-io-comp
 loop bounded, and
 `runtime::tests::ownership::native::region_native_trait_dispatch_fresh_result_reclaims`
 pins the trait-dispatch face.
-
-### A holder that outlives every release mints a process root
-
-`new` and `boundary` hand their result to a consumer that releases it by value.
-A reload has no such consumer. `stdlib_cache::load_bytecode` rebuilds the cached
-stdlib's closures, their templates and their capture cells, and the Rust code
-that receives them keeps them until the instance is gone. No
-`DecrefValueRegion` ever runs against that region, and no other region points at
-it. So its creation claim survives `Runtime::teardown`: one region pinned from
-outside the region graph, holding everything the reload built.
-
-`Alloc::process_root` is the constructor for that shape. It mints the region and
-records it in the process-root registry, so the sweep decrefs it like any other
-root and the cascade takes the restored values with it ([rules.md](rules.md)).
-Deciding this at the mint is what keeps the region unreadable: a caller that
-rooted the region afterwards would need the getter no constructor offers.
-
-The reference is `a_cache_hit_leaves_no_unexplained_references`
-([region_process_teardown/](../../../tests/region_process_teardown)). It asks of a cache-hit runtime what
-`teardown_leaves_no_unexplained_references` asks of a compiled one, on the same
-programs.
 
 ## VM access through the ctx — per-instance VM state
 

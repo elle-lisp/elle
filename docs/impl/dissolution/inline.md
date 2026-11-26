@@ -1,6 +1,6 @@
 # Dissolution: whose body the loop splices
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-26 -->
 
 How a named function's body reaches a fused loop, and what the spliced body
 keeps: its counters and its declarations.
@@ -60,9 +60,10 @@ the metadata of every binding its body introduces. The graft's `Global`
 resolution, such as the arithmetic op in `(+ x 1)`, is the by-name
 re-resolution the boundary needs. If a free global does not resolve in the
 consuming unit, the graft **declines** and the HOF stays a plain call. That is
-correct by construction, never a mis-resolved reference. A fragment is plain data, so it crosses the stdlib disk
-cache with its payload ([the stdlib cache](../stdlib-cache.md)). A cache hit
-inlines the same bodies a stdlib compile does.
+correct by construction, never a mis-resolved reference. A fragment is plain
+data, so a boot image carries it with its payload
+([booting from an image](../image/boot.md)). An image boot inlines the same
+bodies a stdlib compile does.
 
 One close produces both the same-unit entry and the fragment on the payload,
 and what separates the two paths is **where a fragment's free globals

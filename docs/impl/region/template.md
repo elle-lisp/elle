@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-26 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -99,8 +99,8 @@ scan's ownership test already skips.
 
 ## A rebuilt closure's code lands in the closure's region
 
-`send` and the stdlib disk cache rebuild closures from a serialized form. A
-closure rebuilt this way comes from no compile. Its code object is written into
+`send` rebuilds a closure from its serialized form, and a closure rebuilt this
+way comes from no compile. Its code object is written into
 the region the closure itself is rebuilt in: its payload, the payloads of the
 lambdas its child table names, and their headers. Every edge among them is
 a self-edge.
@@ -109,11 +109,6 @@ A code region of its own would close a cycle. The rebuilt constants are born in
 the closure's region, so a child header in a separate code region would hold a
 counted edge into the closure's region, and the closure's header would hold one
 back. Neither region could reach zero.
-
-A cache hit's unit is a compile's product all the same. Its entry and the
-lambdas it nests land in a fresh code region, as a compile's do. Only the
-closure constants it restores take the rule above
-([stdlib-cache.md](../stdlib-cache.md)).
 
 ## One constructor builds a nested lambda's payload
 
@@ -236,8 +231,7 @@ payload's copy and a `LirCode`'s agree on order as well as content.
 The fragment is present on the payload of a nested lambda whose body closes
 ([graft.md](../graft.md)). It is the `LambdaFragment` the lowerer carried on
 the function's head, encoded with `bincode`, so on the payload it is bytes like
-the docstring. An image copies it whole, the stdlib cache stores it as it
-stands, and a thread send carries it. Nothing decodes it until a compile grafts
+the docstring. An image copies it whole, and a thread send carries it. Nothing decodes it until a compile grafts
 the function, and that compile decodes it once. The encoding has a version,
 `FRAGMENT_ENCODING`, which the image fingerprint records, so an image written
 under another encoding falls back to a source boot rather than grafting a body
@@ -258,9 +252,8 @@ value walk meets them:
 
 A carrier that moves a payload to another instance therefore records the
 spelling of each, beside the spellings its value walk records. The image
-dumper, `send` and the stdlib cache are the three carriers. Each reads a
-capture cell's name from the LIR. A unit's entry carries no LIR, and only the
-stdlib cache stores an entry, so an entry's cell names cross with no spelling.
+dumper and `send` are the two carriers, and each reads a capture cell's name
+from the LIR.
 
 The constant pool holds every LIR constant as a value too, so a receiving
 instance learns the fragment's names and the cell names nowhere else. Without

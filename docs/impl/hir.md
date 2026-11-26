@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-26 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -64,10 +64,9 @@ before functionalization in the unit that defines it
 ([code objects](region/template.md)). The graft ([grafting a call](graft.md))
 and loop fusion ([named functions](dissolution/inline.md)) read a callee's
 fragment off the value its binding holds, so a body crosses a unit boundary with
-the function itself. The stdlib disk cache stores the bytes with the payload
-([the stdlib cache](stdlib-cache.md)), and a boot image maps them with it
-([booting from an image](image/boot.md)). So a cache hit and an image boot
-compile user code to the same bytecode a stdlib compile does.
+the function itself. A boot image maps the bytes with the payload
+([booting from an image](image/boot.md)), so an image boot compiles user code
+to the same bytecode a stdlib compile does.
 
 ## What analysis does
 

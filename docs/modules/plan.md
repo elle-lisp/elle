@@ -1,6 +1,6 @@
 # Modules: the plan
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-26 -->
 
 The parts of the module design not yet built: loading as a call, no walk of the value, module images, linking, and the open decisions.
 
@@ -146,9 +146,7 @@ bindings, and a rule that the form reads none. The image carries the compiled
 form instead.
 
 **A disk cache of compiled code beside each source file.** Key a file's
-bytecode on its compile inputs, store it, and load it in the next process. The
-[stdlib disk cache](../impl/stdlib-cache.md) works that way, and it is a
-stopgap. A hit rebuilds every object through the send codec, which
+bytecode on its compile inputs, store it, and load it in the next process. A
+hit would rebuild every object through a codec, which
 [image.md](../impl/image.md) rejects as the CAS cache: an image maps a region and
-decodes no value. A module disk cache would repeat the rejected design for
-user code, so module images replace it.
+decodes no value. So module images replace it.

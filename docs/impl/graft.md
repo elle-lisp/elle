@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-26 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -145,10 +145,9 @@ stdlib's exports. A global that does not resolve keeps the call a call, so the
 stdlib exports every helper a wrapper's body names, such as `dynamic-lt` and
 `check-comparable`.
 
-The stdlib disk cache stores each payload's fragment with the payload
-([the stdlib cache](stdlib-cache.md)), and a boot image maps it with the
-payload ([booting from an image](image/boot.md)). So a call into the stdlib
-grafts the same body under a source boot, a cache hit and an image boot.
+A boot image maps each payload's fragment with the payload
+([booting from an image](image/boot.md)). So a call into the stdlib grafts the
+same body under a source boot and an image boot.
 
 ### A grafted call still proves the definition
 
@@ -337,7 +336,7 @@ stdlib's `even?` guards `%rem x 2` with exactly this condition.
   stayed a call ([the VM](vm.md)).
 - A grafted body from another unit takes the location of the call it replaced.
   Its own spans name files another process may have interned, as a fragment
-  read from the stdlib cache does. So an error a grafted stdlib wrapper raises
+  in a boot image does. So an error a grafted stdlib wrapper raises
   names the program's call.
 - A grafted call to a variadic wrapper allocates no rest list, so an exact
   allocation count moves.
@@ -428,8 +427,6 @@ still runs, and deletes what the types decide around the calls that stay.
   fields, the fragment among them.
 - `lir::emit::tests::payload::a_nested_lambdas_payload_carries_its_fragment`
   — the bytes the lowerer put on the function's head reach its payload.
-- `compiler::stdlib_cache::tests::fragment` — a stdlib restored from the disk
-  cache grafts as a compiled one does, and the stored form carries the bytes.
 - `image::boot::tests::a_call_to_a_stdlib_function_grafts_under_either_boot`
   and `..::the_two_boots_emit_one_bytecode_for_a_user_file` — a hydrated
   closure grafts as a compiled one does, and a user file compiles to one

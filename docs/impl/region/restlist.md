@@ -1,6 +1,6 @@
 # A rest list in one region
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-26 -->
 
 When no cell of a variadic call's rest list can outlive the head, the list is built in one region instead of one region per cell.
 
@@ -96,8 +96,8 @@ soundness.
 The verdict rides the code object as the rest list's layout: one region per
 cell, or one region for the list ([template.md](template.md)). The interpreter's
 environment builder and the JIT's entry block both read it. The layout travels
-with the rest of the code object: to a worker thread, through the stdlib cache,
-and into an image. A carrier that drops it falls back to one region per cell.
+with the rest of the code object: to a worker thread and into an image. A
+carrier that drops it falls back to one region per cell.
 
 For a list in one region, the runtime mints one region and builds the cells
 into it, last argument first. Each cell's `rest` points at the cell built

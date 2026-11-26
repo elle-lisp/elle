@@ -1,6 +1,6 @@
 # Sending a region: the plan
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-26 -->
 
 The order the send design lands in, the pins each milestone lands with, and
 the risks still open.
@@ -32,9 +32,8 @@ replaces in the same change.
    foreign-heap guards in `chan/send` and `chan/recv` go.
 6. **bytes**: `image/encode` and `image/decode`, over the bytes column.
    [Fleet's store](../fleet/plan.md) waits on this milestone.
-7. **delete**: the stdlib disk cache goes, and then `src/value/send`, with
-   `SendKey` and the template codec. [The stdlib cache](../stdlib-cache.md) and
-   every document that cites it go in the same change.
+7. **delete**: `src/value/send` goes, with `SendKey`, once nothing moves a
+   `SendValue`.
 
 Two milestones come later, each with the copying send as its fallback:
 
@@ -141,12 +140,6 @@ guards a behavior its milestone must keep.
 - **The lock.** Bytes with one fingerprint byte flipped refuse the decode by
   name, before anything is mapped.
 - **No residue.** A decode leaves no file in `TMPDIR`.
-
-### delete
-
-- A parent with no boot image spawns a heavy worker, and the worker compiles
-  the standard library and answers. `--boot-image=off` and
-  `Runtime::with_stdlib_cache` compile in the same way.
 
 ## Open risks
 

@@ -121,8 +121,8 @@ pins hold.
 
   Image-booted workers run in sequence give back their mappings: the mapped
   bytes grow by less than one worker's instance across six more of them. The
-  language server stores an image under a cold cache directory and writes no
-  stdlib cache. The WASM entry's host runtime hydrates a stored image.
+  language server stores an image under a cold cache directory. The WASM
+  entry's host runtime hydrates a stored image.
 - Embedded blob: a static in this binary is found in the file that holds it,
   at a 64 KiB-aligned offset, and the bytes there are the static's. Bytes on
   the heap are found in no file. A blob no file holds hydrates from an

@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-26 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -42,7 +42,7 @@ else:
 | What | Why |
 |------|-----|
 | The spawning fiber's withheld capabilities | [Capabilities](signals/capabilities.md) |
-| The stdlib cache directory | [Stdlib cache](impl/stdlib-cache.md) |
+| The boot image the instance holds, if any | [Booting from an image](impl/image/boot.md) |
 | The Unicode generation | A program has one set of string semantics, whichever VM computes a length |
 | The primitives the host registered on the instance ([embedding](embedding.md)) | Code the worker compiles names what code compiled on the instance names |
 

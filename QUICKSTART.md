@@ -1,6 +1,6 @@
 # Elle Quickstart
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-26 -->
 
 Elle is a Lisp with lexical scope, closures, and a signal system.
 
@@ -108,7 +108,6 @@ make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_P
 | [symbol](docs/impl/symbol.md) | Symbol and keyword identity: name hash, per-instance display memo, ordering |
 | [syntax](docs/impl/syntax.md) | The syntax tree: region-native nodes, arenas, packed spans |
 | [image](docs/impl/image.md) | Image persistence design: boot image, environment save/load |
-| [stdlib-cache](docs/impl/stdlib-cache.md) | Disk cache for the compiled standard library |
 | [fleet](docs/impl/fleet.md) | Distributed runtime design: content-addressed tasks over environment images |
 
 ## Reference

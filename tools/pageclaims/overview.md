@@ -1,6 +1,6 @@
 # The page-claims profiler
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-11-26 -->
 
 A profiler that names the code paths claiming the most region pages in one run
 of a program.
@@ -52,23 +52,23 @@ the path's last frame add into one path.
 A chain holds at most 12 frames. When plumbing fills most of a chain, its path
 holds fewer frames than `DEPTH`.
 
-## A stdlib cache of its own
+## A boot image of its own
 
-The profiled `elle` reads the standard library from a cache of its own. Before
-callgrind runs, the tool fills that cache by running an empty program. So the
+A profiling build carries no embedded blob, so the profiled `elle` hydrates a
+boot image from a cache directory of its own. Before callgrind runs, the tool
+fills that cache by running an empty program, which stores the image. So the
 claims are those of a warm start, and two runs of one program rank alike.
 
-The shared cache would not do. Each `elle` binary that stores to a cache
-directory removes the files of the other binaries
-([stdlib-cache](../../docs/impl/stdlib-cache.md)). In that cache, the profiled
-run would compile the standard library, and claim its pages, only when a
-different binary ran last.
+The shared cache would not do. Each `elle` binary that stores a boot image
+removes the images of the other binaries ([boot.md](../../docs/impl/image/boot.md)).
+In that cache, the profiled run would compile its boot sources, and claim
+their pages, only when a different binary ran last.
 
 ## Where the files go
 
 One run keeps its files in `target/page-claims/PID`, where `PID` is the process
 id of the tool. The directory holds the cache, the empty program and the
 callgrind output, and the tool deletes it when the run ends, on success or on
-failure. The `elle` that runs the tool uses no stdlib cache, so it compiles
-the standard library itself. So the tool writes nothing outside `target/`, and
-two runs at once keep their files apart.
+failure. The `elle` that runs the tool reads and writes no cache directory, so
+the tool writes nothing outside `target/`, and two runs at once keep their
+files apart.

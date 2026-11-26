@@ -1,6 +1,6 @@
 # Elle Documentation
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-26 -->
 
 This directory contains language references, design documents, and contributor
 guides. See [QUICKSTART.md](../QUICKSTART.md) for the full table of contents.
@@ -104,7 +104,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 
 | Directory | Content |
 |-----------|---------|
-| [impl/](impl/) | Reader, lexicon, syntax, HIR, LIR, bytecode, VM, JIT, WASM, MLIR, SPIR-V, GPU, values, symbols, stdlib cache |
+| [impl/](impl/) | Reader, lexicon, syntax, HIR, LIR, bytecode, VM, JIT, WASM, MLIR, SPIR-V, GPU, values, symbols |
 
 ## Reference
 
