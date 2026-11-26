@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-26
 //! Opcode handlers for type introspection, collection intrinsics and the syntax view, reached as `crate::vm::types::handle_*`.
 //!
 //! docs/impl/vm.md
@@ -12,7 +12,10 @@ mod intrinsic;
 mod predicate;
 mod view;
 
-pub(crate) use view::{handle_syntax_view, syntax_view};
+pub(crate) use view::handle_syntax_view;
+// The JIT and WASM backends read the view without the operand stack.
+#[cfg(any(feature = "jit", feature = "wasm"))]
+pub(crate) use view::syntax_view;
 
 // The `tests` submodule reads these through `use super::*`.
 #[cfg(test)]
