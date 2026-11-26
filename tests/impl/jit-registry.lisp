@@ -20,7 +20,11 @@
 # A forced compile, which answers whether this build compiles at all.
 (defn registry-probe [x]
   (if x x 1))
-(def anonymous (fn [x] (+ x 1)))
+# A `def` names the `fn` it binds directly, so the `let` keeps this one
+# nameless.
+(def anonymous
+  (let [f (fn [x] (+ x 1))]
+    f))
 (def compiles? (first (protect (compile/run-on :jit registry-probe 1))))
 
 (when compiles?
