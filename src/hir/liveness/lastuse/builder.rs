@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The structural walk that computes each node's raw last use, and records the bookkeeping the fixpoint solver reads.
 //!
 //! docs/impl/region/anchors.md
@@ -47,11 +47,15 @@ pub(super) struct LastUseBuilder<'a> {
     /// the `def`.
     pub(super) propagated_inits: rustc_hash::FxHashSet<HirId>,
     /// `Var` nodes read inside a loop of a binding bound outside it, whose
-    /// last use the walk put at that loop. Such a read can also be a binder's
-    /// init, as the `b` of `(while c (let [s b] …))` is. The next pass reads
-    /// `b` again, so the solve keeps the walk's answer as the init's floor
-    /// (docs/impl/region/lastuse.md).
-    pub(super) loop_reads: rustc_hash::FxHashSet<HirId>,
+    /// last use the walk put at that loop, each with the binding it reads.
+    /// Such a read can also be a binder's init, as the `b` of
+    /// `(while c (let [s b] …))` is. The next pass reads `b` again, so the
+    /// solve keeps the walk's answer as the init's floor, unless `assigned`
+    /// holds `b` (docs/impl/region/lastuse.md).
+    pub(super) loop_reads: HashMap<HirId, Binding>,
+    /// The bindings an `Assign` writes. A name bound to a read of one takes
+    /// a counted reference of its own on every pass.
+    pub(super) assigned: rustc_hash::FxHashSet<Binding>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked, outermost first. A `Var` read inside one, of a binding bound
     /// outside it, has its `last_use` extended so the binding survives
@@ -128,7 +132,7 @@ impl LastUseBuilder<'_> {
                     if self.ord(iter) > self.ord(my_last) {
                         my_last = iter;
                     }
-                    self.loop_reads.insert(hir.id);
+                    self.loop_reads.insert(hir.id, *b);
                     break;
                 }
             }
@@ -160,7 +164,10 @@ impl LastUseBuilder<'_> {
                 self.propagated_inits.insert(value.id);
                 self.walk(value, true, my_last);
             }
-            HirKind::Assign { value, .. } => self.walk(value, true, hir.id),
+            HirKind::Assign { value, target } => {
+                self.assigned.insert(*target);
+                self.walk(value, true, hir.id)
+            }
             HirKind::SetCell { cell, value } => {
                 self.walk(cell, true, hir.id);
                 self.walk(value, true, hir.id);
