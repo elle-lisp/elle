@@ -1,9 +1,8 @@
-// audited: 2026-09-29
+// audited: 2026-11-26
 //! `elle image dump-boot FILE`: boot from source and write the result as a boot image.
 //!
 //! docs/impl/image/boot.md
 
-use crate::compiler::stdlib_cache::StdlibCache;
 use crate::runtime::Runtime;
 
 /// Run the `image` subcommand. Answers the process exit code.
@@ -28,10 +27,7 @@ fn usage(problem: &str) -> i32 {
 ///
 /// The boot is always from source, so the artifact is the one those three
 /// sources produce — an image built by hydrating an image is two hops from
-/// anything a reader could rebuild and compare. The stdlib disk cache is off
-/// for the same reason, and for a second one: a cache hit rebuilds the
-/// library's closures through the send codec, whose capture cells record no
-/// binding, and the dump refuses one of those (docs/impl/image/boot.md).
+/// anything a reader could rebuild and compare (docs/impl/image/boot.md).
 fn dump_boot(path: &std::path::Path) -> i32 {
     let (config, _rest) = match crate::config::Config::parse(&[]) {
         Ok(parsed) => parsed,
@@ -43,7 +39,7 @@ fn dump_boot(path: &std::path::Path) -> i32 {
     crate::config::init(config);
     crate::io::init_process_signals();
 
-    let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
+    let mut rt = Runtime::from_source();
     let code = match rt.dump_boot_image(path) {
         Ok(()) => {
             let bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);

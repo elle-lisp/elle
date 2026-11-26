@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-26
 //! The language server's resident state: the open documents, and the instance they compile against.
 //!
 //! src/lsp/README.md
@@ -12,7 +12,7 @@ use crate::hir::{extract_symbols_from_hir, HirLinter};
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
-use crate::runtime::{BootCaches, BootFrom, RuntimeCore};
+use crate::runtime::{BootFrom, RuntimeCore};
 use crate::symbol::SymbolTable;
 use crate::symbols::SymbolIndex;
 use std::collections::HashMap;
@@ -81,7 +81,7 @@ impl CompilerState {
         let core = RuntimeCore::boot(
             crate::config::get().unicode_generation(),
             true,
-            BootFrom::Caches(BootCaches::process()),
+            BootFrom::Policy(crate::config::get().boot_image()),
         )
         .core;
         Self {

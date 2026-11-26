@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! An HIR body closed over the bindings it names, so it can be re-hosted in any arena.
 //!
 //! docs/impl/hir.md
@@ -190,9 +190,9 @@ impl HirFragment {
     /// fragment read back from a file carries the ids of the process that wrote
     /// it.
     ///
-    /// `span`, when given, replaces every node's span. A fragment restored from
-    /// the stdlib cache carries spans whose file ids another process interned,
-    /// so a graft of another unit's body passes the call's span. A graft of this
+    /// `span`, when given, replaces every node's span. A fragment hydrated from
+    /// a boot image carries spans whose file ids another process interned, so
+    /// a graft of another unit's body passes the call's span. A graft of this
     /// unit's body passes none, and keeps the spans an error it raises names.
     ///
     /// Returns the host binding for every fragment index, so a caller holding

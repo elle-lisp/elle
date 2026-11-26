@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-26
 // docs/threads.md
 //! Serialization of a live `Value` into a Send-safe `SendValue`.
 //!
@@ -17,7 +17,6 @@ mod ctx;
 mod template;
 
 pub(super) use ctx::SerContext;
-pub(super) use template::sendable_from_template;
 
 use closure::send_closure;
 

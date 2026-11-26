@@ -1,8 +1,7 @@
-// audited: 2026-10-21
-//! Loading the standard library into one runtime: obtain its compiled unit,
-//! run it, and register what it exports.
+// audited: 2026-11-26
+//! Loading the standard library into one runtime: compile it, run it, and
+//! register what it exports.
 //!
-//! docs/impl/stdlib-cache.md
 //! docs/stdlib.md
 //! docs/impl/image/boot.md
 //!
@@ -28,49 +27,14 @@ use std::rc::Rc;
 /// This calls that closure, iterates the exports struct, and registers each
 /// export into the compile context's `PrimitiveMeta`, so that
 /// `bind_primitives` pre-binds them for all subsequent compilations.
-pub fn init_stdlib(
-    vm: &mut VM,
-    symbols: &mut SymbolTable,
-    cctx: &mut CompileCtx,
-    cache: &crate::compiler::stdlib_cache::StdlibCache,
-) -> StdlibSource {
+pub fn init_stdlib(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) {
     let boot = crate::trace::boot();
     let t = std::time::Instant::now();
-    // Try the disk cache first: the same stdlib source and the same elle binary
-    // compile to the same bytecode, so a hit skips the whole front end.
-    //
-    // One fork, two arms, one tail. A rejected file falls into the compiling
-    // arm along with a plain absence, so it is *replaced* rather than left to
-    // be rejected again by every later start. The execute → exports tail
-    // exists once, so the two paths cannot drift apart.
-    //
-    // Both arms mark `stdlib-compile`: the boot mark attributes the cost of
-    // OBTAINING the compiled stdlib, so a run that loads it stays comparable
-    // with a run that compiles it.
-    let (unit, source) = match crate::compiler::stdlib_cache::try_load(STDLIB, cache, vm, symbols) {
-        Some(Ok(unit)) => {
-            crate::phase!(boot, "boot", t, "stdlib-compile (cache hit)");
-            (unit, StdlibSource::Cache)
-        }
-        absent_or_rejected => {
-            if let Some(Err(e)) = absent_or_rejected {
-                crate::phase!(boot, "boot", t, "stdlib-cache-rejected ({e}); recompiling");
-            }
-            let t = std::time::Instant::now();
-            let result = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
-                Ok(r) => r,
-                Err(e) => panic!("stdlib compilation failed: {}", e),
-            };
-            crate::phase!(boot, "boot", t, "stdlib-compile");
-            let t = std::time::Instant::now();
-            // Persist so the next process start skips the front end. A write
-            // failure is not fatal — the cache is a speedup, and a fresh
-            // compile is always the fallback.
-            crate::compiler::stdlib_cache::try_store(STDLIB, cache, &result, vm, symbols);
-            crate::phase!(boot, "boot", t, "stdlib-cache-store");
-            (result, StdlibSource::Compiled)
-        }
+    let unit = match compile_file(STDLIB, symbols, cctx, "<stdlib>") {
+        Ok(r) => r,
+        Err(e) => panic!("stdlib compilation failed: {}", e),
     };
+    crate::phase!(boot, "boot", t, "stdlib-compile");
     let t = std::time::Instant::now();
     // Execute stdlib — returns the last expression (a closure).
     let closure_val = match vm.execute(&unit) {
@@ -81,27 +45,10 @@ pub fn init_stdlib(
     // Call the returned closure to get the exports struct.
     let exports_val = call_closure(vm, closure_val);
     register_exports(vm, symbols, cctx, closure_val, exports_val);
-    source
-}
-
-/// Where a runtime's stdlib bytecode came from. Returned by `init_stdlib` so a
-/// caller — a test above all — can tell a cache hit from a recompile; without
-/// it a cache that silently never hits is indistinguishable from one that
-/// always does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StdlibSource {
-    /// Loaded from the disk cache.
-    Cache,
-    /// Compiled from `stdlib.lisp`.
-    Compiled,
-    /// Hydrated out of a boot image, which carries the exports themselves
-    /// rather than bytecode to run. The disk cache was never consulted.
-    Image,
 }
 
 /// Root the stdlib's export struct and module closure, then register each
-/// export into the compile context. The cached and the compiled path both end
-/// here.
+/// export into the compile context.
 fn register_exports(
     vm: &mut VM,
     symbols: &mut SymbolTable,
@@ -122,7 +69,7 @@ fn register_exports(
 }
 
 /// Install a stdlib export struct into the compile context, whatever produced
-/// it: a compile, a disk-cache hit, or a boot image. The aggregate's own
+/// it: a compile or a boot image. The aggregate's own
 /// rooting is the caller's, because an image arrives as one region rooted once.
 pub(crate) fn install_exports(
     symbols: &mut SymbolTable,
@@ -198,8 +145,8 @@ fn extract_exports(
     let mut result = HashMap::new();
     for (key, value) in exports_struct.iter() {
         if let crate::value::types::TableKey::Keyword(hash) = key {
-            // The key spellings came in with the stdlib source, the cache's
-            // name table, or the image's, so a miss is a missed learning site.
+            // The key spellings came in with the stdlib source or the image's
+            // name table, so a miss is a missed learning site.
             let name = symbols
                 .keyword_name(*hash)
                 .map(str::to_string)

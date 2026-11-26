@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! The boot configuration: dump a booted instance's exports and macros as one
 //! image, and install one into a fresh instance.
 //!
@@ -28,7 +28,7 @@ use crate::value::{TableKey, Value};
 use super::ImageError;
 
 pub use blob::Blob;
-pub(crate) use cache::{store, Executable};
+pub(crate) use cache::store;
 pub(crate) use open::OpenImage;
 
 /// The keys the root struct and a macro entry carry. Both halves name them —
@@ -47,8 +47,7 @@ mod key {
 
 /// Where an instance looks for its boot image, and where it stores one.
 ///
-/// A construction parameter rather than process state, for the reason
-/// [`crate::compiler::stdlib_cache::StdlibCache`] is one. The suite builds many
+/// A construction parameter rather than process state. The suite builds many
 /// instances across threads, and a directory that travels with the instance is
 /// what keeps one test's cache invisible to the test beside it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

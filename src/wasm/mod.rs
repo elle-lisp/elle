@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-26
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -284,30 +284,30 @@ fn build_full_source(
     Ok((full_source, stdlib_form_count))
 }
 
-/// The host runtime a run boots under `caches`, with the stdlib when the run
-/// splices it. Compile-time macro expansion runs on its compile context's
-/// macro VM, so a transformer body that calls a stdlib function resolves it
-/// there (docs/impl/wasm.md). It boots as `elle` does: from the boot image
-/// when one hydrates (docs/impl/image/boot.md).
-fn host_runtime(with_stdlib: bool, caches: crate::runtime::BootCaches) -> crate::runtime::Booted {
+/// The host runtime a run boots under the boot-image policy `image`, with the
+/// stdlib when the run splices it. Compile-time macro expansion runs on its
+/// compile context's macro VM, so a transformer body that calls a stdlib
+/// function resolves it there (docs/impl/wasm.md). It boots as `elle` does:
+/// from the boot image when one hydrates (docs/impl/image/boot.md).
+fn host_runtime(with_stdlib: bool, image: crate::image::boot::BootImage) -> crate::runtime::Booted {
     crate::runtime::RuntimeCore::boot(
         crate::config::get().unicode_generation(),
         with_stdlib,
-        crate::runtime::BootFrom::Caches(caches),
+        crate::runtime::BootFrom::Policy(image),
     )
 }
 
-/// Where the host runtime a run boots under `caches` got its boot state.
+/// Where the host runtime a run boots under `image` got its boot state.
 #[cfg(test)]
 fn host_boot_source(
     with_stdlib: bool,
-    caches: crate::runtime::BootCaches,
+    image: crate::image::boot::BootImage,
 ) -> crate::image::boot::BootSource {
-    host_runtime(with_stdlib, caches).boot_source
+    host_runtime(with_stdlib, image).boot_source
 }
 
 fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<String, String> {
-    let mut core = host_runtime(with_stdlib, crate::runtime::BootCaches::process()).core;
+    let mut core = host_runtime(with_stdlib, crate::config::get().boot_image()).core;
     let (vm, symbols, compile) = core.parts();
     let sym_ptr: *mut crate::symbol::SymbolTable = &mut *symbols;
 

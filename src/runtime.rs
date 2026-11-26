@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! The process runtime: one compile-and-run lifecycle and one teardown sweep, shared by every entry path.
 //!
 //! docs/impl/region/rules.md
@@ -26,10 +26,9 @@
 mod boot;
 mod core;
 
-pub use boot::{BootCaches, WorkerBoot};
+pub use boot::WorkerBoot;
 pub use core::RuntimeCore;
 
-use crate::compiler::stdlib_cache::StdlibCache;
 use crate::image::boot::{BootImage, BootSource};
 use crate::pipeline::CompileCtx;
 use crate::symbol::SymbolTable;
@@ -57,7 +56,6 @@ pub struct TeardownReport {
 pub struct Runtime {
     core: RuntimeCore,
     torn_down: bool,
-    stdlib_source: crate::primitives::module_init::StdlibSource,
     boot_source: BootSource,
 }
 
@@ -78,42 +76,37 @@ impl Runtime {
     /// given Unicode generation for its whole life. `Runtime::new()` uses
     /// the newest vendored generation (or the process `--unicode=` choice).
     pub fn with_unicode(gen: crate::segment::Generation) -> Self {
-        Self::build_with(true, gen, BootCaches::process())
+        Self::build_with(true, gen, crate::config::get().boot_image())
     }
 
-    /// Build a stdlib-loaded runtime that boots from source and caches its
-    /// compiled stdlib under `cache` rather than the process-wide directory.
-    /// Two instances given the same directory share a cache; two given
-    /// different ones cannot see each other's, which is what lets tests run
-    /// beside each other. No boot image is read or stored, whatever the
-    /// process-wide policy (docs/impl/image/boot.md).
-    pub fn with_stdlib_cache(cache: StdlibCache) -> Self {
-        Self::with_caches(BootCaches {
-            stdlib: cache,
-            image: BootImage::Off,
-        })
+    /// Build a stdlib-loaded runtime that compiles core.lisp, the prelude and
+    /// the stdlib from source, and reads and stores no boot image, whatever
+    /// the process-wide policy (docs/impl/image/boot.md).
+    pub fn from_source() -> Self {
+        Self::with_boot_image(BootImage::Off)
     }
 
-    /// Build a stdlib-loaded runtime over both cache policies: where its boot
-    /// image lives, and where its compiled stdlib is cached.
-    pub fn with_caches(caches: BootCaches) -> Self {
-        Self::build_with(true, crate::config::get().unicode_generation(), caches)
+    /// Build a stdlib-loaded runtime under the boot-image policy `image`
+    /// rather than the process-wide one. Two instances given different
+    /// directories cannot see each other's images, which is what lets tests
+    /// run beside each other.
+    pub fn with_boot_image(image: BootImage) -> Self {
+        Self::build_with(true, crate::config::get().unicode_generation(), image)
     }
 
     fn build(load_stdlib: bool) -> Self {
         Self::build_with(
             load_stdlib,
             crate::config::get().unicode_generation(),
-            BootCaches::process(),
+            crate::config::get().boot_image(),
         )
     }
 
-    fn build_with(load_stdlib: bool, gen: crate::segment::Generation, caches: BootCaches) -> Self {
+    fn build_with(load_stdlib: bool, gen: crate::segment::Generation, image: BootImage) -> Self {
         let Booted {
             mut core,
-            stdlib_source,
             boot_source,
-        } = RuntimeCore::boot(gen, load_stdlib, BootFrom::Caches(caches));
+        } = RuntimeCore::boot(gen, load_stdlib, BootFrom::Policy(image));
         // The boot compiled under the graft. Every unit from here on compiles
         // under the process's policy (docs/impl/graft.md).
         core.compile().set_graft(crate::config::get().graft);
@@ -130,21 +123,14 @@ impl Runtime {
         Runtime {
             core,
             torn_down: false,
-            stdlib_source,
             boot_source,
         }
     }
 
-    /// Where this instance's stdlib came from. A cache that silently never hits
-    /// still yields a working runtime, so a test that only checks behavior
-    /// cannot tell the two apart — this is what it asserts on instead.
-    pub fn stdlib_source(&self) -> crate::primitives::module_init::StdlibSource {
-        self.stdlib_source
-    }
-
     /// Whether this instance hydrated a boot image or compiled its three boot
-    /// sources. Reported for the reason [`stdlib_source`](Self::stdlib_source)
-    /// is (docs/impl/image/boot.md).
+    /// sources. A warm cache that never hits still yields a working runtime,
+    /// so a test asserts on this rather than on behavior
+    /// (docs/impl/image/boot.md).
     pub fn boot_source(&self) -> BootSource {
         self.boot_source
     }

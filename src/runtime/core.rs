@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! `RuntimeCore`: the per-instance owner bundle, and the construction that points its VM at the rest.
 //!
 //! docs/impl/region/rules.md
@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use super::boot::{hydrate_boot_image, BootCaches, BootFrom};
+use super::boot::{hydrate_boot_image, BootFrom};
 use crate::image::boot::OpenImage;
 use crate::pipeline::CompileCtx;
 use crate::register_primitives;
@@ -62,12 +62,12 @@ impl RuntimeCore {
         Self::for_boot(gen, &[]).0
     }
 
-    /// Boot a core with the stdlib under `caches`, as `Runtime::with_caches`
-    /// does, for a holder that never tears it down: a core has no teardown
-    /// sweep to run on drop.
-    pub fn with_caches(caches: BootCaches) -> Self {
+    /// Boot a core with the stdlib under the boot-image policy `image`, as
+    /// `Runtime::with_boot_image` does, for a holder that never tears it down:
+    /// a core has no teardown sweep to run on drop.
+    pub fn with_boot_image(image: crate::image::boot::BootImage) -> Self {
         let gen = crate::config::get().unicode_generation();
-        Self::boot(gen, true, BootFrom::Caches(caches)).core
+        Self::boot(gen, true, BootFrom::Policy(image)).core
     }
 
     /// Build a core out of the first of `images` this binary accepts, or out

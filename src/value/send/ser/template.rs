@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-26
 //! Serializing a code object into a `SendableClosure`: its fields, the values and code objects it names, and its spellings.
 //!
 //! docs/threads.md
@@ -47,7 +47,7 @@ fn send_children(
 /// identity to intern, so it is emitted inline; `env`/`squelch_mask` are empty.
 /// Recurses on the child table, so a receiver rebuilds the full nested-lambda
 /// tree and every `MakeClosure` resolves.
-pub(in crate::value::send) fn sendable_from_template(
+fn sendable_from_template(
     t: &ClosureTemplate,
     ctx: &mut SerContext<'_>,
 ) -> Result<SendableClosure, String> {

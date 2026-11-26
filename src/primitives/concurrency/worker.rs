@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-26
 //! The `sys/spawn` worker: stack sizing, the fresh VM it stands up, the kill
 //! switch it reads, and the completion channel it answers on.
 //!
@@ -121,8 +121,8 @@ pub(super) fn spawn_closure_impl(
     // one set of string semantics, whichever VM computes a length.
     let unicode_generation = ctx.unicode_generation();
     // Moved into the worker thread beside the generation: the worker boots as
-    // its parent did, from the image its parent holds or through its parent's
-    // stdlib cache (docs/impl/image/boot.md).
+    // its parent did, from the image its parent holds or from the three
+    // sources (docs/impl/image/boot.md).
     let parent_boot = ctx.worker_boot();
     // The worker takes the calling fiber's withheld set, as a fiber takes its
     // creator's (docs/signals/capabilities.md). The capability gate reads the

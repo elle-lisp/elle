@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-26
 //! Allocation capabilities for native code: `Alloc` carries a call's region and heap, and `NativeCtx` adds the VM.
 //!
 //! docs/impl/region/ctx.md
@@ -75,17 +75,6 @@ impl<'h> Alloc<'h> {
     /// caller and is freed value-based by the consumer's `DecrefValueRegion`.
     pub(crate) fn boundary(heap: &'h mut FiberHeap) -> Self {
         Self::new(heap)
-    }
-
-    /// A ctx whose values a Rust holder keeps for the life of the instance —
-    /// the stdlib cache's reload (docs/impl/region/ctx.md). It mints a fresh
-    /// region like [`new`](Self::new) and records it as a process root, so the
-    /// teardown sweep decrefs it and the cascade takes the values with it.
-    /// Rooting at the mint is why no constructor hands the region back.
-    pub(crate) fn process_root(heap: &'h mut FiberHeap) -> Self {
-        let region = heap.new_runtime_region();
-        crate::value::arena::register_process_root_region(heap, region);
-        Self::with_region(region, heap)
     }
 
     /// Test-only view of the ctx's own region. Exists ONLY under `cfg(test)` so
@@ -351,7 +340,7 @@ impl<'h> NativeCtx<'h> {
     }
 
     /// What a worker spawned from here boots from: this instance's image, or
-    /// its stdlib cache (docs/impl/image/boot.md).
+    /// the three sources when it holds none (docs/impl/image/boot.md).
     pub fn worker_boot(&self) -> crate::runtime::WorkerBoot {
         self.vm().worker_boot().clone()
     }

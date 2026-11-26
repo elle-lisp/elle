@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-26
 //! `ClosureTemplate` — the region-resident header of a code object: one slice naming its payload.
 //!
 //! docs/impl/region/template.md
@@ -240,8 +240,8 @@ impl ClosureTemplate {
     // ── owned re-forms ─────────────────────────────────────────────────
     //
     // The boundaries that rebuild a code object somewhere else — the
-    // cross-thread `send` encoder, the stdlib disk cache, a copy onto another
-    // heap — want the compile-time shapes back. Each allocates, so they are
+    // cross-thread `send` encoder, a copy onto another heap — want the
+    // compile-time shapes back. Each allocates, so they are
     // for those boundaries and not for the running VM, which reads the
     // payload's own form.
 

@@ -244,7 +244,7 @@ witness: release  ## Run each fence the witness table names, to confirm its rele
 
 # ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
 # (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool
-# takes `--cache=`, so it reads and writes no stdlib cache.
+# takes `--cache=`, so it reads and writes no cache directory.
 DEPTH ?= 3
 TOP   ?= 20
 page-claims:  ## Rank the code paths that claim region pages: ARGS="FILE" [DEPTH=3] [TOP=20]

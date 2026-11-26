@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-26
 //! Primitive registration: the canonical table list, the name and id indexes
 //! over it, and the startup pass that installs every def into a VM.
 //!
@@ -161,28 +161,6 @@ pub(crate) fn static_name(id: crate::value::SymbolId) -> Option<&'static str> {
 /// The def a built-in name resolves to, by id rather than by spelling.
 pub(crate) fn def_by_symbol(id: crate::value::SymbolId) -> Option<&'static PrimitiveDef> {
     static_index().get(&id.0).map(|(_, def)| *def)
-}
-
-/// Visit the ordered canonical primitive-table identity (`name` + `aliases`)
-/// into a hasher.
-///
-/// A native-fn immediate's whole payload is its `prim_id`, which is the def's
-/// index in the canonical `ALL_TABLES`+`ffi_tables` enumeration. That id is
-/// only meaningful against the exact table that minted it. So consumers that
-/// persist native-fn values (the stdlib disk cache) must mix this identity
-/// into their key. Any addition, removal, rename, or reorder of a canonical
-/// primitive changes the hash, and invalidates the persisted payload.
-pub(crate) fn hash_prim_table_identity<H: std::hash::Hasher>(hasher: &mut H) {
-    for def in canonical_defs() {
-        hash_def_identity(def, hasher);
-    }
-}
-
-/// Hash one def's identity fields (see [`hash_prim_table_identity`]).
-fn hash_def_identity<H: std::hash::Hasher>(def: &PrimitiveDef, hasher: &mut H) {
-    use std::hash::Hash;
-    def.name.hash(hasher);
-    def.aliases.hash(hasher);
 }
 
 /// Register all primitive functions with the VM and build metadata.

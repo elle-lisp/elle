@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-26 -->
 
 Runtime value representation using a tagged union.
 
@@ -47,7 +47,7 @@ Runtime value representation using a tagged union.
 | `LSet` | [heap.rs](heap.rs) | Immutable set (`RegionSlice<Value>`, region-inline), no `RefCell` |
 | `LSetMut` | [heap.rs](heap.rs) | Mutable set, its members in a `SetStore` (type name `:@set`) |
 | `TableKey` | [types.rs](types.rs) | Struct key. `Copy`; string and array keys hold a `Value`, so a key owns no Rust heap memory ([values.md](../../docs/impl/values.md)) |
-| `SendKey` | [send/mod.rs](send/mod.rs) | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread or reaches serde |
+| `SendKey` | [send/mod.rs](send/mod.rs) | The owning key form `SendValue`'s maps are keyed on — the only key type that crosses a thread |
 | `SuspendedFrame` | [fiber/frame.rs](fiber/frame.rs) | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
 | `PausedCaller` | [fiber/caller.rs](fiber/caller.rs) | A caller activation waiting in `Fiber::callers` while its interpreted callee runs on the same dispatch loop ([vm.md](../../docs/impl/vm.md)) |
 | `FiberStatus` | [fiber/status.rs](fiber/status.rs) | Fiber lifecycle: New, Alive, Paused, Dead, Error |
@@ -116,8 +116,9 @@ These are set during the swap protocol in `with_child_fiber`
 
 6. **Thread transfer uses `SendValue`.** `SendValue` deep-copies a value's
      heap data into owned Rust data for transfer between threads. A
-     user-attached trait table is serialized as part of the value. A registry
-     default crosses as nil, and the receiving thread's registry supplies it.
+     user-attached trait table crosses with the value, except on the variants
+     "SendValue behavior" below names. A registry default
+     crosses as nil, and the receiving thread's registry supplies it.
 
 7. **`SuspendedFrame` captures everything needed to resume.** A single type
      holds the bytecode, constants, env, IP, and operand stack for a suspended
@@ -129,7 +130,7 @@ These are set during the swap protocol in `with_child_fiber`
      a probe, wrong to store. Every site that puts a key into a struct calls
      `TableKey::intern_into` first, which copies a string or array payload into
      the destination region; a `Heap` key keeps aliasing, because its identity
-     is the point. `SendKey` is the owning form for `send` and serde
+     is the point. `SendKey` is the owning form for `send`
      ([values.md](../../docs/impl/values.md)).
 
 ## Value encoding
@@ -242,5 +243,7 @@ cross-thread transfer intact via the intern table in `SendBundle`. The
 receiving thread reconstructs the trait table in `into_value_inner` and
 stores the result in the new `traits` field of the heap object.
 
-Each `SendValue` variant for the traitable types carries a
-`traits: Box<SendValue>` field (or `traits: SendValue` if not recursive).
+The `SendValue` variants of a string, a closure, a syntax object, a channel
+end and a stdio port carry no `traits`, so a table attached to one of those
+stays behind. Every other sendable traitable variant carries a
+`traits: Box<SendValue>` field.

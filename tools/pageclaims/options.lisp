@@ -1,5 +1,5 @@
-(elle/epoch 17)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-26
 # Reads the page-claims tool's arguments, and plans the commands one run makes.
 # tools/pageclaims/overview.md
 
@@ -50,8 +50,8 @@
 
   (defn commands [opts dir]
     "The files and commands of one run in DIR, a directory of its own. The
-  profiled elle reads a stdlib cache in DIR, and the warm-up fills it first by
-  running an empty program outside callgrind."
+  profiled elle hydrates a boot image from the cache in DIR, and the warm-up
+  stores it first by running an empty program outside callgrind."
     (def cache (string "--cache=" (path/join dir "cache")))
     (def out (path/join dir "callgrind.out"))
     (def empty (path/join dir "empty.lisp"))
