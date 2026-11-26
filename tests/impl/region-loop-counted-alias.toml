@@ -1,0 +1,2 @@
+# A released page is unmapped, so a release that runs too early faults at its deref.
+trace = ["guardfree"]
