@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # Re-anchoring a release out of a branch arm frees nothing early, on any arm.
 #
 # docs/impl/region/window.md
@@ -206,6 +206,20 @@
         n))
   (length (get sink (%sub (length sink) 1))))
 
+# (e7) the arm binds the live-in subject through a holder whose init may build a
+# new value, and the subject is read again after the branch. The holder allocated
+# none of the subject's region, so the window admits it, and the moved release
+# must land behind both post-branch reads. Driven on both arms.
+(defn w-arm-holder (v t)
+  (let [r (match t
+            :a (first v)
+            _
+              (let [s (match (type-of v)
+                        :list v
+                        _ (list v))]
+                (first s)))]
+    (%add (length r) (length (first v)))))
+
 # (f) a nested LAMBDA inside the arm, called repeatedly: its body's releases
 # belong to the closure's activation. Hoisting one to the enclosing branch would
 # release a region resolved against the wrong frame's slot.
@@ -395,6 +409,8 @@
 (var ai 0)
 (var aj 0)
 (var ak 0)
+(var al 0)
+(var am 0)
 (while (%lt i 3000)
   (assign a (w-result i :a))
   (assign b (w-store (list (string "s" i) i) :a))
@@ -411,6 +427,8 @@
   (assign aa (w-cursor (list (string "aa" i) (string "aa2" i)) :a))
   (assign ab (w-cursor (list (string "ab" i) (string "ab2" i)) :z))
   (assign ac (w-cursor-store (list (string "ac" i) i) :a))
+  (assign al (w-arm-holder (list (string "al" i) i) :a))
+  (assign am (w-arm-holder (list (string "am" i) i) :z))
   (assign f (w-lambda i :a))
   (assign g (w-park (list (string "g" i) i) :a))
   (assign h (w-tail (list (string "h" i) i) :b))
@@ -452,6 +470,9 @@
 (assert (%gt ab 0) "live-in subject freed under the cursor that walks it")
 (assert (%gt ac 0)
         "stored subject freed though a sibling arm only walks it with a cursor")
+(assert (%gt al 0)
+        "live-in subject freed by the merge release a holder's sibling admitted")
+(assert (%gt am 0) "live-in subject freed under the arm's holder")
 (assert (%gt y 0) "value born in an arm freed under its own read")
 (assert (= z 0) "value born in an arm ran its allocating arm on the other path")
 (assert (%gt f 0) "lambda-body value released from the enclosing frame")

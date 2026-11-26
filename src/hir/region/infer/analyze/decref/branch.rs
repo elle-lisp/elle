@@ -1,12 +1,11 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The branch-arm release window: moving a release that landed inside one arm
 //! onto the branch, where every path arrives.
 //!
 //! docs/impl/region/window.md
 
 use super::super::super::*;
-use super::branchscopes::{alias_binders, collect_branch_scopes, BranchWindowScopes, FrameExit};
-use crate::hir::defuse::DefUseBuilder;
+use super::branchscopes::{birth_sites, collect_branch_scopes, BranchWindowScopes, FrameExit};
 
 /// Re-anchor a release that landed inside one arm of a branch onto the branch.
 ///
@@ -68,14 +67,12 @@ use crate::hir::defuse::DefUseBuilder;
 /// that channel looks for it at the call. So each exiting call that names the
 /// region as its callee records it (`anchored_callee_calls`).
 ///
-/// The region must also be **live-in**: every allocation and holder-definition
-/// site lies outside the branch's subtree. So a value born inside an arm keeps its
+/// The region must also be **live-in**: every site that mints it lies outside the
+/// branch's subtree (`birth_sites`). So a value born inside an arm keeps its
 /// in-arm release, and the window only moves what the branch received.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn pin_branch_arm_releases(
     info: &mut RegionInfo,
     hir: &Hir,
-    du: &DefUseBuilder,
     order: &Order,
     last_use: &LastUse,
     inference_binding_regions: &HashMap<Binding, Vec<Region>>,
@@ -93,30 +90,9 @@ pub(super) fn pin_branch_arm_releases(
     // `node_hi` is exactly innermost-outward.
     scopes.branches.sort_by_key(|b| b.node_hi);
 
-    // The live-in premise's anchors: every allocation site of each region, and the
-    // definition site of every holder binding that could be the release's ROUTE.
-    // `record_region_slot` keys `region_to_slot` on a region's ALLOCATION site. So
-    // the slot a value-routed release loads belongs to the binding whose init
-    // allocated the region. For a region no site in this body allocates, it
-    // belongs to the parameter the lambda prologue recorded. An ALIAS binder,
-    // whose init merely names another binding, records no slot and can never be
-    // the route. So its definition site anchors nothing: an arm that introduces
-    // one has not given birth to the value, and the branch still received it.
-    let aliases = alias_binders(hir);
-    let mut region_anchors: HashMap<Region, Vec<u32>> = HashMap::new();
-    for (b, regions) in inference_binding_regions {
-        if aliases.contains(b) {
-            continue;
-        }
-        if let Some(&d) = du.def_site.get(b) {
-            for &r in regions {
-                region_anchors.entry(r).or_default().push(ord(d));
-            }
-        }
-    }
-    for (&alloc_id, &r) in &info.alloc_region {
-        region_anchors.entry(r).or_default().push(ord(alloc_id));
-    }
+    // The live-in premise's anchors: the sites that mint each region, and no
+    // binding that names it.
+    let region_anchors = birth_sites(hir, info, inference_binding_regions, order);
     // Only regions whose `decref_point` lands inside the branch's arms can move,
     // so index the regions by post-order `decref_point` once and let each branch
     // read the arm intervals as ranges of the index. A move files the region

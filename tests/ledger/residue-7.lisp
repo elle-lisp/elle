@@ -1,10 +1,10 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # The runner's residue ledger, part 7 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/lang/gun-mesh-reads.lisp" :residue 2321]
 ["tests/lang/gun-redial.lisp" :residue 1135]
-["tests/lang/gun-redis.lisp" :residue 1335]
+["tests/lang/gun-redis.lisp" :residue 1334]
 ["tests/lang/gun-sea-admission.lisp" :residue 105]
 ["tests/lang/gun-sea-forged.lisp" :residue 559]
 ["tests/lang/gun-sea.lisp" :residue 246]
@@ -48,11 +48,11 @@
 ["tests/lang/host-refusal.lisp" :residue 0]
 ["tests/lang/http2.lisp" :residue 1075]
 ["tests/lang/http2-session-futex.lisp" :residue 0]
-["tests/lang/http.lisp" :residue 239]
-["tests/lang/http-sse.lisp" :residue 462]
+["tests/lang/http.lisp" :residue 149]
+["tests/lang/http-sse.lisp" :residue 454]
 ["tests/lang/hygiene.lisp" :residue 2]
 ["tests/lang/import-again.lisp" :residue 0]
-["tests/lang/import-answer.lisp" :residue 169]
+["tests/lang/import-answer.lisp" :residue 8]
 ["tests/lang/import-cache.lisp" :residue 0]
 ["tests/lang/import-loaders.lisp" :residue 1]
 ["tests/lang/import-old-module.lisp" :residue 4]
