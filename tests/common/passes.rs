@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The `elle test` passes a suite target runs, read off `make --dry-run`.
 //!
 //! docs/testing.md
@@ -32,6 +32,19 @@ impl Pass {
     /// Whether the pass reads each file's charge on the runner's heap.
     pub fn charge(&self) -> bool {
         self.command.split_whitespace().any(|w| w == "--charge")
+    }
+
+    /// The words of the command that set the runner's own mode: a boot image,
+    /// a trace or a profile.
+    pub fn modes(&self) -> Vec<&str> {
+        self.command
+            .split_whitespace()
+            .filter(|w| {
+                ["--boot-image=", "--trace", "--profile"]
+                    .iter()
+                    .any(|m| w.starts_with(m))
+            })
+            .collect()
     }
 
     /// The program each child runs under, when the pass names one.
@@ -246,6 +259,13 @@ pub fn assert_rig_runs(pass: &Pass, rig: &str, what: &str) {
 /// itself, the binary `runner` names: every file, in-process, with no flag.
 #[allow(dead_code)]
 pub fn assert_plain_language_pass(target: &str, pass: &Pass, runner: &str) {
+    assert_language_pass(target, pass, runner, &[]);
+}
+
+/// Assert that `pass` runs the language suite as a plain pass does, with
+/// `modes` the only words that set the runner's mode.
+#[allow(dead_code)]
+pub fn assert_language_pass(target: &str, pass: &Pass, runner: &str, modes: &[&str]) {
     assert_eq!(
         pass.files,
         lang_files(),
@@ -267,10 +287,11 @@ pub fn assert_plain_language_pass(target: &str, pass: &Pass, runner: &str) {
         None,
         "`make {target}` runs the language suite on another program than the build"
     );
-    assert!(
-        !pass.command.contains("--trace") && !pass.command.contains("--profile"),
-        "`make {target}` hands the runner a mode, so the suite runs a runtime no \
-         user runs:\n  {}",
+    assert_eq!(
+        pass.modes(),
+        modes,
+        "`make {target}` hands the runner another mode than it names, so the suite \
+         runs a runtime nobody asked for:\n  {}",
         pass.command
     );
 }
