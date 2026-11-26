@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-25 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -454,6 +454,24 @@ gives no hint that a directory is what needs deleting. A cache that cannot
 miss is not a cache.
 `wasm::tests::cache::cache_entry_that_cannot_be_deserialized_recompiles` pins
 the fallback on both cached paths.
+
+## The caches hold one build's entries
+
+Three caches live beneath the `--cache=` directory: the compiled modules, and
+the wasmtime compile cache of each engine, the full-module one in
+`incremental` and the tiered one in `tiered`. All three sit in `wasm/<build>/`,
+where `<build>` hashes the executable's length and modification time, the
+identity the warm cache keys on ([boot.md](image/boot.md)). A binary that
+cannot read its own identity caches nothing, and precompiles no closure.
+
+The first time a process opens its build's directory, it removes every other
+directory beside it. So a rebuild leaves the last build's entries behind
+rather than every build's, which is what keeps the directory bounded. Within
+one build the entries still grow with each distinct program it compiles.
+
+Two wasm builds that run side by side, such as `elle-wasm` and
+`elle-rig-wasm`, evict each other at each start. The evicted build reads
+misses and fails its writes, and the cache ignores both.
 
 ## CLI flags
 

@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-25
 //! Lazy (tiered) WASM compilation.
 //!
 //! docs/impl/wasm.md
@@ -89,14 +89,9 @@ impl WasmTier {
         // Fast compile for per-closure modules (they're tiny).
         config.cranelift_opt_level(OptLevel::Speed);
 
-        // Disk cache for incremental compilation
-        if let Some(cache_dir) = &crate::config::get().cache {
-            let path = std::path::PathBuf::from(&cache_dir).join("tiered");
-            std::fs::create_dir_all(&path).ok();
-            let cache = super::store::DiskCache::new(path);
-            config
-                .enable_incremental_compilation(std::sync::Arc::new(cache))
-                .ok();
+        // This build's compile cache for the tier (docs/impl/wasm.md).
+        if let Some(dir) = super::cache::build_dir() {
+            super::cache::cache_compiles_in(&mut config, &dir.join("tiered"));
         }
 
         let engine = Engine::new(&config).map_err(|e| e.to_string())?;
