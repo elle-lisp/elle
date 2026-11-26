@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-25 -->
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
@@ -212,7 +212,8 @@ Register allocation uses deterministic slot freeing order.
 
 This enables reliable module caching: `--cache=/path` hashes the
 WASM bytes and reuses a pre-compiled module on a cache hit, skipping the
-Wasmtime compile.
+Wasmtime compile. [cache.rs](cache.rs) holds the caches, and
+[wasm.md](../../docs/impl/wasm.md) gives their layout beneath `--cache=`.
 
 ## Tiered compilation (lazy WASM)
 

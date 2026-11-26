@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 //! Wasmtime Engine/Store/Linker setup, and the closure-env builder both
 //! WASM hosts share.
 //!
@@ -68,125 +68,26 @@ pub(in crate::wasm) fn read_self_slot<T: 'static>(
     (tag, payload)
 }
 
-/// Disk-backed compilation cache for wasmtime incremental compilation.
-/// Cache entries are stored as files named by hex-encoded key hash.
-#[derive(Debug)]
-pub struct DiskCache(std::path::PathBuf);
-
-impl DiskCache {
-    pub fn new(path: std::path::PathBuf) -> Self {
-        DiskCache(path)
-    }
+/// Create a Wasmtime Engine with tail-call support, caching its compiles in
+/// this build's `incremental` directory (docs/impl/wasm.md).
+pub fn create_engine() -> Result<Engine> {
+    let dir = super::cache::build_dir().map(|d| d.join("incremental"));
+    create_engine_in(dir.as_deref())
 }
 
-impl wasmtime::CacheStore for DiskCache {
-    fn get(&self, key: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
-        let path = self.0.join(hex_name(key));
-        std::fs::read(&path).ok().map(std::borrow::Cow::Owned)
-    }
-
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> bool {
-        let path = self.0.join(hex_name(key));
-        atomic_write(&path, &value)
-    }
-}
-
-/// Where `--cache` keeps the compiled artifact for `wasm_bytes`, or `None`
-/// when no cache directory is configured. `kind` separates the two module
-/// shapes that share the directory ("closure", "module").
-pub(crate) fn cache_path_for(kind: &str, wasm_bytes: &[u8]) -> Option<std::path::PathBuf> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let cache_dir = crate::config::get().cache.as_ref()?;
-    let mut hasher = DefaultHasher::new();
-    wasm_bytes.hash(&mut hasher);
-    Some(std::path::PathBuf::from(cache_dir).join(format!("{kind}_{:016x}.bin", hasher.finish())))
-}
-
-/// Compile `wasm_bytes`, reusing the artifact at `cache_path` when one is
-/// there and this wasmtime can load it.
-///
-/// A cache read that does not yield a usable module is a MISS: the name records
-/// a hash of the WASM bytes and nothing else, while `Module::deserialize`
-/// accepts an artifact only from the wasmtime that wrote it. Compiling fresh
-/// and overwriting repairs the entry in place, which is what keeps a wasmtime
-/// upgrade from stranding every warm cache (docs/impl/wasm.md).
-pub(crate) fn cached_or_compile(
-    engine: &Engine,
-    wasm_bytes: &[u8],
-    cache_path: Option<&std::path::Path>,
-) -> Result<Module> {
-    let Some(path) = cache_path else {
-        return Module::new(engine, wasm_bytes);
-    };
-
-    if let Ok(bytes) = std::fs::read(path) {
-        // SAFETY: the cache directory holds artifacts this process wrote.
-        if let Ok(module) = unsafe { Module::deserialize(engine, &bytes) } {
-            return Ok(module);
-        }
-    }
-
-    let module = Module::new(engine, wasm_bytes)?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).ok();
-    }
-    if let Ok(serialized) = module.serialize() {
-        atomic_write(path, &serialized);
-    }
-    Ok(module)
-}
-
-/// Write data to a file atomically: write to a temp file in the same
-/// directory, then rename into place. Prevents readers from seeing
-/// partial writes.
-pub(crate) fn atomic_write(path: &std::path::Path, data: &[u8]) -> bool {
-    use std::io::Write;
-    let dir = match path.parent() {
-        Some(d) => d,
-        None => return false,
-    };
-    let mut tmp = match tempfile::NamedTempFile::new_in(dir) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-    if tmp.write_all(data).is_err() {
-        return false;
-    }
-    tmp.persist(path).is_ok()
-}
-
-fn hex_name(key: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(key.len() * 2);
-    for b in key {
-        write!(s, "{:02x}", b).ok();
-    }
-    s
-}
-
-/// Create a Wasmtime Engine with tail-call support.
+/// Create a Wasmtime Engine with tail-call support, caching its compiles in
+/// `cache` when one is named.
 ///
 /// Cranelift optimizes the module at `OptLevel::Speed`. A `wasm` build runs no
 /// JIT, so the JIT's policy has nothing to say about this tier.
-pub fn create_engine() -> Result<Engine> {
+pub fn create_engine_in(cache: Option<&std::path::Path>) -> Result<Engine> {
     let mut config = Config::new();
     config.wasm_tail_call(true);
     config.wasm_multi_value(true);
     config.cranelift_opt_level(OptLevel::Speed);
-
-    // Disk-backed compilation cache: reuses compiled machine code across runs.
-    // Keyed on WASM bytecode content, so stdlib compilation is amortized.
-    if let Some(cache_dir) = &crate::config::get().cache {
-        let path = std::path::PathBuf::from(cache_dir);
-        std::fs::create_dir_all(&path).ok();
-        let cache = DiskCache(path);
-        config
-            .enable_incremental_compilation(std::sync::Arc::new(cache))
-            .ok();
+    if let Some(dir) = cache {
+        super::cache::cache_compiles_in(&mut config, dir);
     }
-
     Engine::new(&config)
 }
 

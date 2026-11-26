@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-25
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -21,6 +21,7 @@
 //! - `host` — Host state (`ElleHost`), primitive dispatch, I/O
 //! - `linker` — Wasmtime host function registration
 //! - `store` — Engine/Store setup, env preparation, module execution
+//! - `cache` — the caches beneath `--cache=`, held to one build's directory
 //! - `resume` — Fiber resume chain for yield-through-call
 //! - `regalloc` — Virtual register → WASM local compaction
 //! - `lazy` — Tiered compilation (per-closure WASM in VM mode)
@@ -30,6 +31,7 @@
 //! Immediate values (int, float, nil, bool, symbol, keyword) are
 //! constructed directly in WASM with no host call.
 
+pub(crate) mod cache;
 mod controlflow;
 pub mod emit;
 pub mod handle;
@@ -206,8 +208,8 @@ fn compile_or_cache_module(
     engine: &wasmtime::Engine,
     wasm_bytes: &[u8],
 ) -> Result<wasmtime::Module, String> {
-    let cache_path = store::cache_path_for("closure", wasm_bytes);
-    store::cached_or_compile(engine, wasm_bytes, cache_path.as_deref()).map_err(|e| e.to_string())
+    let cache_path = cache::cache_path_for("closure", wasm_bytes);
+    cache::cached_or_compile(engine, wasm_bytes, cache_path.as_deref()).map_err(|e| e.to_string())
 }
 
 /// Build the source the full-module WASM path actually compiles: the stdlib
@@ -373,7 +375,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
         .closures
         .iter()
         .any(|c| c.view().signal().may_suspend());
-    if crate::config::get().cache.is_some() && !any_may_suspend {
+    if cache::build_dir().is_some() && !any_may_suspend {
         let mut all_ok = true;
         for (i, closure_func) in lir_module.closures.iter().enumerate() {
             if let Some(standalone) = emit::emit_single_closure(
@@ -430,8 +432,8 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let linker = linker::create_linker(&engine).map_err(|e| e.to_string())?;
     let t3 = std::time::Instant::now();
 
-    let cache_path = store::cache_path_for("module", &result.wasm_bytes);
-    let module = store::cached_or_compile(&engine, &result.wasm_bytes, cache_path.as_deref())
+    let cache_path = cache::cache_path_for("module", &result.wasm_bytes);
+    let module = cache::cached_or_compile(&engine, &result.wasm_bytes, cache_path.as_deref())
         .map_err(|e| e.to_string())?;
     let t4 = std::time::Instant::now();
     let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
