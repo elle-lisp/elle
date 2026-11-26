@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-26
 //! The plain records a frozen function is made of: nodes, blocks, constants and sites.
 //!
 //! docs/impl/lir.md
@@ -19,7 +19,7 @@ pub const NO_REG: u32 = u32::MAX;
 pub const NO_FILE: u32 = 0;
 
 /// One instruction: 48 bytes, every one of them written.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Node {
     pub(crate) start: u32,
@@ -50,7 +50,7 @@ pub struct Node {
 }
 
 /// One basic block: its label, its run of nodes, and its terminator.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct BlockRec {
     pub(crate) label: u32,
@@ -71,7 +71,7 @@ pub struct BlockRec {
 }
 
 /// An immediate constant: a kind byte and 64 bits.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct ConstRec {
     pub(crate) kind: u8,
@@ -112,7 +112,7 @@ impl ConstRec {
 
 /// A yield point, a call site or a fuel charge site: where the interpreter
 /// resumes, and the registers live on the operand stack there.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct SiteRec {
     pub(crate) resume_ip: u32,

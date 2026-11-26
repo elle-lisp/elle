@@ -12,9 +12,9 @@
 // verdict per file, and still gates green, so the recipe is checked here.
 
 use crate::common::{
-    assert_plain_language_pass, assert_producer_pass, assert_rig_runs, build_producer_files,
-    charge_files, isolated_impl_files, lang_files, make_expand, makefile_rules, passes,
-    suite_targets, the_pass, Pass, CHARGE_SKIP,
+    assert_language_pass, assert_plain_language_pass, assert_producer_pass, assert_rig_runs,
+    build_producer_files, charge_files, isolated_impl_files, lang_files, make_expand,
+    makefile_rules, passes, suite_targets, the_pass, Pass, CHARGE_SKIP,
 };
 use std::collections::BTreeSet;
 
@@ -204,17 +204,13 @@ fn every_profile_a_pass_names_exists() {
     );
 }
 
-// The boot image's gate runs the language suite on an instance that hydrates
-// its image instead of compiling the stdlib, and changes nothing else.
+// The source boot's gate runs the language suite as `smoke-lang` does, on a
+// runner that boots from source (docs/impl/image/boot.md). The counter-factual:
+// a pass that isolates each file runs none on each tier.
 #[test]
-fn smoke_boot_image_runs_the_language_suite_from_the_image() {
-    let pass = the_pass("smoke-boot-image");
-    assert_eq!(pass.files, lang_files());
-    assert_eq!(
-        pass.isolate(),
-        Some(format!("--boot-image={}", make_expand("BOOT_IMAGE_DIR")).as_str()),
-        "each file boots from the stored image"
-    );
+fn smoke_source_boot_runs_the_language_suite_booted_from_source() {
+    let pass = the_pass("smoke-source-boot");
+    assert_language_pass("smoke-source-boot", &pass, "ELLE", &["--boot-image=off"]);
 }
 
 // `make smoke` is what a contributor runs before a push. `SMOKE_PASSES` names what it runs after `qa`, and the dry run

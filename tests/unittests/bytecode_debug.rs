@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-25
 // Prints a compiled unit's entry bytecode and constants, for reading what the
 // emitter wrote.
 //
@@ -17,12 +17,7 @@ fn compile(
     let _ = elle::register_primitives(&mut vm, symbols);
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut SymbolTable);
-    elle::init_stdlib(
-        &mut vm,
-        symbols,
-        &mut cctx,
-        &elle::compiler::stdlib_cache::StdlibCache::Off,
-    );
+    elle::init_stdlib(&mut vm, symbols, &mut cctx);
     elle::pipeline::compile(source, symbols, &mut cctx, source_name)
 }
 

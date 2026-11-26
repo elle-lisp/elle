@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-25
 //! What the prim_id registry answers: every def resolves back to itself, and a reader never waits on a writer.
 //!
 //! docs/impl/values.md
@@ -20,9 +20,10 @@ fn address(def: &PrimitiveDef) -> usize {
     def as *const PrimitiveDef as usize
 }
 
-/// The canonical defs hold the first ids, in table order. The stdlib cache
-/// keys a stored `prim_id` on that order alone, so a seed that numbered them
-/// any other way would hand a cached native-fn another def.
+/// The canonical defs hold the first ids, in table order. A body fragment
+/// stores a native-fn by its `prim_id`, and a boot image carries fragments to
+/// another process of the same build. So a seed that numbered the defs any
+/// other way would hand a stored native-fn another def.
 #[test]
 fn a_canonical_def_holds_its_table_position() {
     for (position, def) in canonical_defs().enumerate() {

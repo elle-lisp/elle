@@ -1,6 +1,6 @@
 # Sending a region
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-26 -->
 
 A design where a value crosses a thread as a sealed region whose pages move,
 and crosses a process as an image: one copy, and no decode.
@@ -15,8 +15,8 @@ The copy is [the dumper's](image/dumping.md), and the bytes are
 
 `sys/spawn` moves a closure and its result as a `SendBundle`
 ([threads](../threads.md)). `SendValue` is a second encoding of every heap
-variant, on the Rust heap: `SendValue`, `SendableClosure`, `SendKey`,
-`SendSyntax`, and a serde mirror. The sender walks the graph into boxes,
+variant, on the Rust heap: `SendValue`, `SendableClosure`, `SendKey` and
+`SendSyntax`. The sender walks the graph into boxes,
 vectors, strings and maps; the receiver rebuilds every object through an
 allocation context. That is two copies and an allocation per object, and every
 change to a heap layout is paid in both encodings. A code object crosses as its
@@ -31,8 +31,8 @@ When the sending worker exits, its heap tears down, and the receiver reads freed
 pages: a worker that sends a heap string and exits crashes the process that
 receives it, where an integer crosses fine.
 
-`SendValue` has a byte form only for the stdlib disk cache, and only for a
-subset of values. A process boundary needs bytes ([fleet](fleet.md)).
+`SendValue` has no byte form, and a process boundary needs bytes
+([fleet](fleet.md)).
 
 ## A message is a sealed region
 
@@ -164,12 +164,8 @@ files or RDF; this design provides no portable value format.
 
 ## What this deletes
 
-- `src/value/send`: `SendValue`, `SendBundle`, `SendableClosure`, `SendKey`,
-  `SendSyntax`, the serde mirror, and the template codec.
-- The stdlib disk cache, the codec's one other user. The boot image's warm
-  cache serves the starts it served. The three readers left — `--boot-image=off`,
-  `Runtime::with_stdlib_cache`, and the workers of a parent with no image —
-  compile instead ([the stdlib cache](stdlib-cache.md)).
+- `src/value/send`: `SendValue`, `SendBundle`, `SendableClosure`, `SendKey`
+  and `SendSyntax`.
 - The cross-store read a channel makes, and the guards in `chan/send` and
   `chan/recv` that tolerate it.
 - With the mutable foundation, the environment image's side-stream.

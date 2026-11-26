@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 // Signal inference across function boundaries: what a call to a direct, higher-order, reassigned or unknown callee signals.
 //
 // docs/signals/inference.md
@@ -45,12 +45,7 @@ fn analyze_with_stdlib(
 ) -> Result<elle::pipeline::AnalyzeResult, String> {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_symbols(symbols as *mut SymbolTable);
-    elle::init_stdlib(
-        vm,
-        symbols,
-        &mut cctx,
-        &elle::compiler::stdlib_cache::StdlibCache::Off,
-    );
+    elle::init_stdlib(vm, symbols, &mut cctx);
     elle::pipeline::analyze(source, symbols, vm, &mut cctx, source_name)
 }
 

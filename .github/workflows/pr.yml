@@ -344,19 +344,17 @@ jobs:
             target/elle-state/cas
           retention-days: 14
 
-  # The language suite booted from the warm cache rather than from core.lisp,
-  # prelude.lisp and stdlib.lisp. Every release `make elle` proves its embedded
-  # blob hydrates; this is the one job that proves the warm cache does, and that
-  # a source boot and an image boot compile alike (docs/analysis/ci.md).
-  boot-image:
-    name: Boot Image Tests
+  # The language suite booted from source, where every other job hydrates an
+  # image. This job also proves that a source boot and an image boot compile
+  # alike, and that the warm cache hydrates (docs/analysis/ci.md).
+  source-boot:
+    name: Source Boot Tests
     needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
-      # A hydrated region is a region, and the region checks are
-      # #[cfg(debug_assertions)] — without this the suite drives the image's
-      # pages with every one of them compiled out.
+      # The region checks are #[cfg(debug_assertions)]. Without this the suite
+      # drives a source boot's regions with every one of them compiled out.
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # Where this job's session DB and CAS are written, so the upload step can
       # name them (docs/analysis/ci.md).
@@ -376,13 +374,13 @@ jobs:
         run: git submodule update --init plugins
       - name: make suite-plugins
         run: make suite-plugins
-      - name: make smoke-boot-image
-        run: make smoke-boot-image
+      - name: make smoke-source-boot
+        run: make smoke-source-boot
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-boot-image
+          name: session-source-boot
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
@@ -1056,7 +1054,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, docs, tests-combined, default-elle, default-rig, default-charge, nojit, boot-image, pool, wasm, mlir, plugins, aarch64-elle, aarch64-rig, aarch64-charge, aarch64-tests, aarch64-noffi, android, macos-elle, macos-rig, macos-charge, macos-tests]
+    needs: [changes, qa, docs, tests-combined, default-elle, default-rig, default-charge, nojit, source-boot, pool, wasm, mlir, plugins, aarch64-elle, aarch64-rig, aarch64-charge, aarch64-tests, aarch64-noffi, android, macos-elle, macos-rig, macos-charge, macos-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -1078,10 +1076,11 @@ jobs:
       - name: Check the build with no JIT
         if: needs.nojit.result == 'failure'
         run: exit 1
-      # The only job that boots from an image. A failure here is hydration or
-      # the language suite answering differently under it, and either blocks.
-      - name: Check boot image
-        if: needs.boot-image.result == 'failure'
+      # The only job that boots from source. A failure here is a parity
+      # difference, a warm cache that no longer hydrates, or the language suite
+      # answering differently under a source boot, and each blocks.
+      - name: Check source boot
+        if: needs.source-boot.result == 'failure'
         run: exit 1
       - name: Check thread-pool I/O tests
         if: needs.pool.result == 'failure'

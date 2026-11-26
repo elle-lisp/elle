@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 // The embedded blob: an instance hydrates the blob it is given, stores
 // nothing, and falls back to the warm cache when the blob is refused.
 // docs/impl/image/blob.md
@@ -10,9 +10,7 @@
 // a release `make elle` checks the blob its binary carries.
 
 use super::*;
-use elle::compiler::stdlib_cache::StdlibCache;
 use elle::image::boot::{Blob, BootImage, BootSource};
-use elle::runtime::BootCaches;
 
 /// `bytes`, copied into memory that lives for the rest of the process at the
 /// alignment the embedded blob has.
@@ -33,7 +31,7 @@ fn aligned(bytes: &[u8]) -> &'static [u8] {
 fn valid_blob() -> Blob {
     let dir = crate::common::ScratchDir::new("image-blob-dump");
     let path = dir.join("boot.image");
-    let mut rt = Runtime::with_stdlib_cache(StdlibCache::Off);
+    let mut rt = Runtime::from_source();
     rt.dump_boot_image(&path).expect("dump a boot image");
     drop(rt);
     Blob::new(aligned(&std::fs::read(&path).expect("read the dump")))
@@ -45,17 +43,9 @@ fn refused_blob() -> Blob {
 }
 
 /// A runtime that boots from `blob`, falling back to the warm cache in
-/// `fallback`, with a stdlib cache under `dir` so the only files it can hit
-/// are this test's.
-fn runtime_over(
-    dir: &std::path::Path,
-    blob: Blob,
-    fallback: Option<std::path::PathBuf>,
-) -> Runtime {
-    Runtime::with_caches(BootCaches {
-        stdlib: StdlibCache::Dir(dir.join("stdlib")),
-        image: BootImage::Embedded { blob, fallback },
-    })
+/// `fallback`.
+fn runtime_over(blob: Blob, fallback: Option<std::path::PathBuf>) -> Runtime {
+    Runtime::with_boot_image(BootImage::Embedded { blob, fallback })
 }
 
 /// Every `.image` file in `dir`, which may not exist.
@@ -80,7 +70,7 @@ fn images_in(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 fn an_instance_hydrates_a_valid_blob_and_stores_nothing() {
     let dir = crate::common::ScratchDir::new("image-blob-hit");
     let warm = dir.join("boot");
-    let mut rt = runtime_over(dir.path(), valid_blob(), Some(warm.clone()));
+    let mut rt = runtime_over(valid_blob(), Some(warm.clone()));
     assert_eq!(
         rt.boot_source(),
         BootSource::Image,
@@ -106,14 +96,11 @@ fn an_instance_hydrates_a_valid_blob_and_stores_nothing() {
 fn a_refused_blob_falls_back_to_the_warm_cache() {
     let dir = crate::common::ScratchDir::new("image-blob-fallback");
     let warm = dir.join("boot");
-    let seeding = Runtime::with_caches(BootCaches {
-        stdlib: StdlibCache::Dir(dir.join("stdlib")),
-        image: BootImage::Dir(warm.clone()),
-    });
+    let seeding = Runtime::with_boot_image(BootImage::Dir(warm.clone()));
     assert_eq!(seeding.boot_source(), BootSource::Compiled);
     drop(seeding);
 
-    let rt = runtime_over(dir.path(), refused_blob(), Some(warm));
+    let rt = runtime_over(refused_blob(), Some(warm));
     assert_eq!(
         rt.boot_source(),
         BootSource::Image,
@@ -127,7 +114,7 @@ fn a_refused_blob_falls_back_to_the_warm_cache() {
 fn a_refused_blob_over_a_cold_cache_compiles_and_stores() {
     let dir = crate::common::ScratchDir::new("image-blob-cold");
     let warm = dir.join("boot");
-    let first = runtime_over(dir.path(), refused_blob(), Some(warm.clone()));
+    let first = runtime_over(refused_blob(), Some(warm.clone()));
     assert_eq!(first.boot_source(), BootSource::Compiled);
     drop(first);
     assert_eq!(
@@ -136,7 +123,7 @@ fn a_refused_blob_over_a_cold_cache_compiles_and_stores() {
         "a refused blob over a cold cache stored no image"
     );
 
-    let next = runtime_over(dir.path(), refused_blob(), Some(warm));
+    let next = runtime_over(refused_blob(), Some(warm));
     assert_eq!(
         next.boot_source(),
         BootSource::Image,
@@ -144,15 +131,9 @@ fn a_refused_blob_over_a_cold_cache_compiles_and_stores() {
     );
 }
 
-// A refused blob with no warm cache compiles, and writes no image anywhere.
+// A refused blob with no warm cache compiles.
 #[test]
 fn a_refused_blob_with_no_fallback_compiles() {
-    let dir = crate::common::ScratchDir::new("image-blob-alone");
-    let rt = runtime_over(dir.path(), refused_blob(), None);
+    let rt = runtime_over(refused_blob(), None);
     assert_eq!(rt.boot_source(), BootSource::Compiled);
-    drop(rt);
-    assert!(
-        !dir.join("boot").exists(),
-        "a blob with no fallback wrote a warm cache"
-    );
 }

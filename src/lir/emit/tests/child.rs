@@ -1,9 +1,8 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 //! Which child-table entry `LirView::child_of` names, against the table the emitter wrote.
 //!
 //! docs/impl/jit-closure.md
 
-use crate::compiler::stdlib_cache::StdlibCache;
 use crate::lir::{ClosureId, InstrRef, LirView};
 use crate::value::{ClosureTemplate, Value};
 
@@ -47,7 +46,7 @@ fn words(v: Value) -> (u64, u64) {
 /// and the closure it builds runs the wrong body.
 #[test]
 fn child_of_names_the_header_each_make_closure_builds_over() {
-    let mut rt = crate::runtime::Runtime::with_stdlib_cache(StdlibCache::Off);
+    let mut rt = crate::runtime::Runtime::from_source();
     let (_, symbols, cctx) = rt.parts();
     let unit = crate::pipeline::compile_file(
         crate::pipeline::sources::STDLIB,

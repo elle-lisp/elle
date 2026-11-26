@@ -36,7 +36,7 @@
 ["tests/cli/trace-keywords.lisp" :residue 0]
 ["tests/cli/trace-phases.lisp" :residue 0]
 ["tests/cli/trace-residue.lisp" :residue 0]
-["tests/cli/trace-stdlib-cache.lisp" :residue 0]
+["tests/cli/source-boot.lisp" :residue 0]
 ["tests/cli/uncaught-raise.lisp" :residue 0]
 ["tests/cli/unicode-flag.lisp" :residue 0]
 ["tests/cli/version.lisp" :residue 0]

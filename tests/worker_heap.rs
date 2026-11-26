@@ -1,9 +1,10 @@
-// audited: 2026-10-20
+// audited: 2026-11-25
 //! A worker thread's heap dies with the thread.
 //!
+//! docs/threads.md
+//!
 //! Its own binary: `mapped_bytes` is one process-wide counter, and the window
-//! measured below is a minute and a half wide (docs/analysis/testing.md
-//! § "Process-global state needs its own binary").
+//! measured below is a minute and a half wide (docs/analysis/testing.md).
 //
 // `os/spawn` stands a whole instance up on the worker: a VM, a symbol table, a
 // compile context, and the region heap every value it builds lives in. The
@@ -32,9 +33,8 @@ mod common;
 use common::eval_source;
 use elle::value::fiberheap::mapped_bytes;
 
-use elle::compiler::stdlib_cache::StdlibCache;
 use elle::image::boot::{BootImage, BootSource};
-use elle::runtime::{BootCaches, Runtime};
+use elle::runtime::Runtime;
 
 /// One gauge window at a time. `mapped_bytes` counts every thread's pages, so
 /// two tests measuring at once would each read the other's workers.
@@ -89,8 +89,7 @@ fn worker_heap_returns_its_pages_at_join() {
         after_seven < after_one + 4 * 1024 * 1024,
         "worker heaps outlive their threads: 1 worker left {after_one} bytes \
          of region pages mapped, 7 left {after_seven} — a joined worker's heap \
-         must go with it (docs/threads.md § A worker owns its heap and gives \
-         it back)",
+         must go with it (docs/threads.md)",
     );
 }
 
@@ -104,12 +103,9 @@ fn worker_heap_returns_its_pages_at_join() {
 fn an_image_booted_workers_mapping_goes_with_it_at_join() {
     let _gauge = GAUGE.lock().unwrap_or_else(|e| e.into_inner());
     let dir = common::ScratchDir::new("worker-heap-image");
-    let caches = || BootCaches {
-        stdlib: StdlibCache::Off,
-        image: BootImage::Dir(dir.path().to_path_buf()),
-    };
-    drop(Runtime::with_caches(caches()));
-    let mut rt = Runtime::with_caches(caches());
+    let image = || BootImage::Dir(dir.path().to_path_buf());
+    drop(Runtime::with_boot_image(image()));
+    let mut rt = Runtime::with_boot_image(image());
     assert_eq!(
         rt.boot_source(),
         BootSource::Image,

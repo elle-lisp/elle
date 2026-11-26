@@ -1,30 +1,22 @@
-//! `CaptureMask` — which of a function's locally-defined slots need a capture
-//! cell (an env `CaptureCell`/LBox), indexed by slot with NO upper bound.
+// audited: 2026-11-26
+//! `CaptureMask`: which of a function's locally-defined slots need a capture cell, for any number of slots.
 //!
-//! WHY a type instead of a bare `u64`: a `u64` mask can only name the first 64
-//! locally-defined slots, forcing every consumer (the VM env builder, the JIT
-//! prologue, the WASM env builders, the bytecode emitter's stack-vs-env
-//! decision) into a conservative `index >= 64` fallback that *always* treats a
-//! local beyond bit 63 as a captured cell, because the mask cannot say
-//! otherwise. That fallback mints a fresh per-execution region holding a dead
-//! `CaptureCell` for every uncaptured high local — one leaked region per such
-//! local PER CALL (docs/impl/region/rules.md Rule 8). Functions with > 64 locals
-//! (stdlib `map`/`merge`/`group-by`, and `zip` transitively) would leak
-//! `num_locals - 64` regions on every call. The newtype carries an unbounded
-//! bitset, so no such fallback is needed.
+//! docs/impl/region/cells.md
 //!
-//! Naming every slot precisely lets each consumer ask exactly "is THIS slot
-//! captured?": an uncaptured high local gets a bare-NIL env placeholder (no
-//! cell, no leak), a genuinely captured local at any index is celled correctly.
+//! A slot past bit 63 is named as exactly as one below it. The environment
+//! builders of the VM and the WASM backend, the JIT prologue and the emitter
+//! each ask of a slot whether it is captured, and an uncaptured slot gets no
+//! cell. A mask of one `u64` would make each of them cell every slot past
+//! bit 63.
 //!
-//! Representation: little-endian `u64` words, bit `i` at `words[i / 64]` bit
-//! `i % 64`. The all-clear mask is the empty `words` vec; constructors trim
-//! trailing zero words so equal sets compare equal under the derived `PartialEq`
-//! (relied on by `Closure`'s equality).
+//! Bit `i` is bit `i % 64` of `words[i / 64]`. The empty mask holds no words,
+//! and every constructor trims trailing zero words, so two masks of one set
+//! compare equal under the derived `PartialEq`, which `Closure`'s equality
+//! relies on.
 
 /// A capture bitmask over a function's locally-defined slots, unbounded in
 /// width. Bit `i` set means slot `i` needs a capture cell.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CaptureMask {
     words: Vec<u64>,
 }
@@ -58,8 +50,8 @@ impl CaptureMask {
         self.words.iter().all(|&w| w == 0)
     }
 
-    /// Build a mask from a single `u64` of low bits (slots 0..63). Used at the
-    /// boundaries that still hand us a `u64` (e.g. the legacy params side).
+    /// Build a mask from a single `u64` of low bits (slots 0..63), for a
+    /// boundary that holds the mask as one word.
     pub fn from_u64(bits: u64) -> Self {
         if bits == 0 {
             CaptureMask::empty()
@@ -75,13 +67,14 @@ impl CaptureMask {
         self.words.first().copied().unwrap_or(0)
     }
 
-    /// The backing words (little-endian), for serialization.
+    /// The backing words, lowest slots first, as a payload or a frozen
+    /// function stores them.
     pub fn words(&self) -> &[u64] {
         &self.words
     }
 
-    /// Reconstruct a mask from its serialized words, trimming trailing zero
-    /// words so the result compares equal to any other encoding of the same set.
+    /// Rebuild a mask from its stored words, trimming trailing zero words so
+    /// the result compares equal to any other encoding of the same set.
     pub fn from_words(mut words: Vec<u64>) -> Self {
         while words.last() == Some(&0) {
             words.pop();
@@ -91,8 +84,8 @@ impl CaptureMask {
 }
 
 /// Hex rendering for the `--dump=dfa` / `arena/dump` diagnostics: the words as a
-/// big integer, most-significant first (`0` when empty). Keeps the historical
-/// `capture_locals_mask=0x..` dump format working without caller changes.
+/// big integer, most-significant first (`0` when empty), as
+/// `capture_locals_mask=0x..` prints it.
 impl std::fmt::LowerHex for CaptureMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.words.iter().rposition(|&w| w != 0) {

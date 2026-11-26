@@ -1,6 +1,6 @@
 # Symbols and keywords — identity is the name hash
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-11-26 -->
 
 A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name. Nothing mints it
 and no table owns it: the same name yields the same id in every symbol table,
@@ -68,7 +68,6 @@ A memo learns a name where names already travel:
 | `make_external` | the type name a plugin wraps an external in; the string lives in the plugin's `.so`, so no vocabulary entry can carry it |
 | the signal registry | every signal name read back out of the process-global registry — by `(signals)`, `fiber/caps`, a compile query's `:bits` set, or a capability denial |
 | `send` | the bundle's name table — the spelling of every symbol and keyword the value holds, a code payload's own names included ([region/template.md](region/template.md)), resolved through the sender's memo and the vocabulary — replayed into the receiver's memo |
-| the stdlib cache | the stored templates' name table, which `send` builds, replayed as the cache loads |
 | hydration and the boot image | the image's name table, recorded as the image is built, a code payload's own names included, and replayed into the hydrating instance |
 | `ConstTemplate` decode | symbols and keywords encoded by name in the constant pool |
 

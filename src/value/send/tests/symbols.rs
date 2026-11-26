@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! A symbol or keyword that crosses the send boundary names the same thing on the receiving side.
 //!
 //! docs/impl/symbol.md
@@ -168,53 +168,4 @@ fn a_keyword_names_the_same_keyword_on_both_sides() {
         );
         assert_eq!(receiver.keyword_name(kw_hash), Some("kw-send-xt"));
     });
-}
-
-// ── a LIR symbol constant crosses unchanged ─────────────────────────
-
-/// The JIT materializes a symbol constant straight into a `Value::symbol`,
-/// so the id that crosses the boundary must name the same symbol on the other
-/// side. It does, with no translation step: the id is the name's hash.
-///
-/// The counter-factual: with per-process table indices as ids, the loading side
-/// would remap them against a stored name map, and an id the map missed would
-/// silently become whatever symbol held that index there. The round-trip would
-/// yield a different `SymbolId`, and the JIT would compile a comparison against
-/// a symbol no source text spells.
-#[test]
-fn a_lir_symbol_constant_survives_serialization_as_the_name_hash() {
-    use crate::lir::code::ConstRef;
-    use crate::lir::{InstrRef, LirCode, LirOwned, Reg, Terminator};
-    use crate::value::SymbolId;
-
-    let lir = LirFixture::new(Arity::Exact(0))
-        .block(
-            0,
-            &[InstrRef::Const {
-                dst: Reg(0),
-                value: ConstRef::Symbol(SymbolId::of("answerish")),
-            }],
-            Terminator::Return(Reg(0)),
-        )
-        .build();
-
-    let bytes = bincode::serialize(lir.code()).expect("LIR serializes");
-    let back: LirCode = bincode::deserialize(&bytes).expect("deserializes");
-    let back = LirOwned::from_parts(back, Vec::new()).expect("the LIR loads no values");
-
-    let mut ids = Vec::new();
-    for node in back.view().nodes() {
-        if let InstrRef::Const {
-            value: ConstRef::Symbol(sid),
-            ..
-        } = node.instr()
-        {
-            ids.push(sid);
-        }
-    }
-    assert_eq!(
-        ids,
-        vec![SymbolId::of("answerish")],
-        "the stored id must still be the hash of `answerish`"
-    );
 }

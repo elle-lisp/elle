@@ -1,7 +1,7 @@
 .PHONY: all elle release elle-rig boot-blob docs docgen smoke test qa crosscheck clean space help \
        smoke-lang smoke-impl smoke-eager smoke-producers smoke-charge smoke-scrub \
        tree-producers \
-       smoke-boot-image smoke-nojit smoke-pool smoke-pool-impl smoke-pool-producers \
+       smoke-source-boot smoke-nojit smoke-pool smoke-pool-impl smoke-pool-producers \
        smoke-mlir smoke-mlir-impl smoke-mlir-producers smoke-noffi \
        smoke-wasm smoke-wasm-impl smoke-wasm-full \
        elle-nojit elle-pool elle-mlir elle-noffi elle-wasm check-wasm \
@@ -244,7 +244,7 @@ witness: release  ## Run each fence the witness table names, to confirm its rele
 
 # ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
 # (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool
-# takes `--cache=`, so it reads and writes no stdlib cache.
+# takes `--cache=`, so it reads and writes no cache directory.
 DEPTH ?= 3
 TOP   ?= 20
 page-claims:  ## Rank the code paths that claim region pages: ARGS="FILE" [DEPTH=3] [TOP=20]
@@ -476,39 +476,29 @@ smoke-scrub: elle elle-rig  ## The language suite on the rig, each released page
 	@echo "=== the language suite, each released page scrubbed ==="
 	$(call RUN_SUITE,$(LANG_FILES),--isolate '--profile $(SCRUB_PROFILE)',$(ELLE_RIG))
 
-# The language suite booted from the warm cache instead of from core.lisp,
-# prelude.lisp and stdlib.lisp — dump-boot's gate (docs/impl/image/boot.md).
-# A release `make elle` proves its blob hydrates, but no other target proves
-# the warm cache does, and a start that cannot hydrate boots from source and
-# passes. Every start below names the directory, so none reads the blob. The
-# target runs `bytecode-parity` first: a corpus that answers alike under an
-# image boot can still have compiled to other bytecode, and only the dumps show
-# that.
+# The language suite on a source boot, where every other pass hydrates an
+# image. It is the boot `elle image dump-boot` writes the blob from
+# (docs/impl/image/boot.md). The target runs `bytecode-parity` first: a corpus
+# that answers alike under the two boots can still have compiled to other
+# bytecode, and only the dumps show that. Parity also proves that the warm
+# cache hydrates.
 #
-# The directory lives under target/ rather than the temp root: an image is
-# megabytes, a store prunes the one an earlier build left, and `make clean`
-# takes the directory with the rest of the build output. It starts empty, so
-# the first start below always pays the store every child then reads.
-#
-# The hydration proof is the `[trace:boot] image-hydrate` mark, and it is the
-# whole difference between this target and `smoke-lang`. A binary that ignored
-# `--boot-image=` would accept it and boot from its blob or from source, and an
-# image every start refuses is replaced and refused again — either way the
-# suite passes and the gate reports a boot that never happened. Same argument
-# as `check-wasm`'s `[wasm]` marker.
-BOOT_IMAGE_DIR ?= target/boot-image
-
-smoke-boot-image: elle bytecode-parity  ## The language suite booted from an image (dump-boot's gate)
-	@echo "=== boot image: store one, then hydrate it ==="
-	@rm -rf "$(BOOT_IMAGE_DIR)"
-	@$(ELLE) --boot-image=$(BOOT_IMAGE_DIR) -e '(+ 1 2)' >/dev/null
-	@out=$$($(ELLE) --boot-image=$(BOOT_IMAGE_DIR) --trace=boot -e '(+ 1 2)' 2>&1 >/dev/null); \
-	printf '%s\n' "$$out" | grep 'image-hydrate' \
-		|| { printf '%s\n' "$$out"; \
-		     echo "FAILED: the second start did not hydrate the stored image, so the suite would boot from source"; \
-		     exit 1; }
-	@echo "=== the language suite, each file booted from the image in $(BOOT_IMAGE_DIR) ==="
-	$(call RUN_SUITE,$(LANG_FILES),--isolate '--boot-image=$(BOOT_IMAGE_DIR)')
+# The proof is a start, and the worker it spawns, whose `[trace:boot]` marks
+# show a `prelude` compile and no `blob-map` or `image-hydrate`. A binary that
+# ignored `--boot-image=off` would hydrate its blob, and the suite would pass
+# on a boot that never happened. Same argument as `check-wasm`'s `[wasm]`
+# marker.
+smoke-source-boot: elle bytecode-parity  ## The language suite booted from source, after bytecode parity
+	@echo "=== a start under --boot-image=off compiles its boot ==="
+	@out=$$($(ELLE) --boot-image=off --trace=boot -e '(sys/join (sys/spawn (fn [] 1)))' 2>&1 >/dev/null); \
+	if printf '%s\n' "$$out" | grep -q -e 'image-hydrate' -e 'blob-map' \
+		|| ! printf '%s\n' "$$out" | grep -q '^\[trace:boot\] prelude '; then \
+		printf '%s\n' "$$out"; \
+		echo "FAILED: the start hydrated an image or compiled no prelude, so the suite would not boot from source"; \
+		exit 1; \
+	fi
+	@echo "=== the language suite, booted from source ==="
+	$(call RUN_SUITE,$(LANG_FILES),--boot-image=off)
 
 # The bytecode golden (docs/config.md): every corpus file's and the standard
 # library's `--dump=bytecode`, recorded under target/ by one binary and

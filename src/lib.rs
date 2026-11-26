@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-26
 //! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
 //! docs/embedding.md
@@ -34,7 +34,6 @@
 //!
 //! ```
 //! use elle::{eval, init_stdlib, register_primitives, SymbolTable, VM};
-//! use elle::compiler::stdlib_cache::StdlibCache;
 //! use elle::pipeline::CompileCtx;
 //!
 //! let mut vm = VM::new();
@@ -47,10 +46,7 @@
 //! let mut cctx = CompileCtx::new();
 //! vm.set_compile_ctx(&mut cctx as *mut CompileCtx);
 //! vm.set_symbols(&mut symbols as *mut SymbolTable);
-//! // The standard-library disk cache is a construction parameter, not
-//! // process-global state, so an embedder names one per instance;
-//! // `Process` takes the process-wide `--cache` choice, as `Runtime` does.
-//! init_stdlib(&mut vm, &mut symbols, &mut cctx, &StdlibCache::Process);
+//! init_stdlib(&mut vm, &mut symbols, &mut cctx);
 //!
 //! let code = "(+ 1 2 3)";
 //! let result = eval(code, &mut symbols, &mut vm, &mut cctx, "<example>").unwrap();

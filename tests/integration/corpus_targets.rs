@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-25
 // The suite targets run the binary through the runner alone, `make qa` runs what the QA job runs, and runs first.
 //
 // docs/testing.md
@@ -57,10 +57,10 @@ fn every_suite_target_runs_the_binary_through_the_runner_alone() {
         ("smoke-wasm-full", "ELLE_WASM"),
         ("tree-producers", "RELEASE_RIG"),
     ];
-    // The boot-image gate runs `elle` itself before its pass, to prove the
-    // image hydrates; tests/runner/boot-image.lisp checks that step.
+    // The source boot's gate runs `elle` itself before its pass, to prove the
+    // start compiles; tests/runner/source-boot.lisp checks that step.
     let mut checked: BTreeSet<String> = targets.iter().map(|(t, _)| t.to_string()).collect();
-    checked.insert("smoke-boot-image".to_string());
+    checked.insert("smoke-source-boot".to_string());
     assert_eq!(
         checked,
         suite_targets(),

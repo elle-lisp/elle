@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! What the bytecode emitter writes: control flow, yield points and the
 //! coalescing oracle.
 //!
@@ -101,7 +101,6 @@ const CORPUS: &str = r#"
 /// included, as its name, its bytecode and the LIR the JIT compiles it from:
 /// a copy of each code payload's, sites and all.
 fn compiled_lambdas(source: &str) -> Vec<(String, Vec<u8>, LirOwned)> {
-    use crate::compiler::stdlib_cache::StdlibCache;
     use crate::value::ClosureTemplate;
     fn walk(t: &ClosureTemplate, out: &mut Vec<(String, Vec<u8>, LirOwned)>) {
         let lir = t
@@ -114,7 +113,7 @@ fn compiled_lambdas(source: &str) -> Vec<(String, Vec<u8>, LirOwned)> {
             walk(&t.child(i), out);
         }
     }
-    let mut rt = crate::runtime::Runtime::with_stdlib_cache(StdlibCache::Off);
+    let mut rt = crate::runtime::Runtime::from_source();
     let (_, symbols, cctx) = rt.parts();
     let unit = crate::pipeline::compile_file(source, symbols, cctx, "<lambdas>")
         .expect("the source compiles");

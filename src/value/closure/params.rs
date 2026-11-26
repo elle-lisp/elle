@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-26
 //! The parameter limit, the bit each parameter owns in a parameter mask, and how a variadic lambda collects its rest.
 //!
 //! docs/functions.md
@@ -39,7 +39,7 @@ pub enum VarargTag {
 /// region for the whole list. The region analysis proves which one a lambda may
 /// take (docs/impl/region/restlist.md); every carrier that cannot say falls
 /// back to `PerCell`, which is always correct.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RestListLayout {
     /// Each cell in a region of its own, so a tail the callee hands out

@@ -1,12 +1,10 @@
-// audited: 2026-11-11
+// audited: 2026-11-25
 //! The gates on the post-teardown residue: what one run may leave behind.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/image/boot.md
 
 use super::*;
-use elle::compiler::stdlib_cache::StdlibCache;
-use elle::primitives::module_init::StdlibSource;
 
 /// The sweep must be *observable* and *idempotent*. The residual live-region
 /// count is the standing oracle: it is the set of regions whose RC never reached
@@ -56,13 +54,12 @@ fn process_teardown_is_observable_and_idempotent() {
 ///
 /// The run goes through `execute_scheduled`, the path every entry point takes,
 /// so the scheduler wrapper's own allocations are inside the measurement. The
-/// stdlib is compiled rather than read from the disk cache, so every region in
-/// the residue was minted by this run and the verdict does not move with the
-/// state of a cache file.
+/// runtime boots from source, so every region in the residue was minted by
+/// this run and the verdict does not move with the state of an image file.
 #[test]
 fn teardown_leaves_no_unexplained_references() {
     for src in PROGRAMS {
-        let pinned = pinned_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), src);
+        let pinned = pinned_after_teardown(Runtime::from_source(), src);
         assert!(
             pinned.is_empty(),
             "{src}: regions pinned from outside the region graph: {pinned:#?}"
@@ -78,40 +75,6 @@ const PROGRAMS: [&str; 2] = [
     "(def squares (map (fn [x] (* x x)) (list 1 2 3)))",
 ];
 
-/// The same property on the cache-hit boot path.
-/// `teardown_leaves_no_unexplained_references` compiles the stdlib so its
-/// verdict does not move with the state of a cache file. That is exactly what
-/// stops it seeing this: a hit rebuilds the stdlib's closures, templates
-/// and capture cells through an allocation context of its own, and the Rust
-/// code that keeps them releases nothing.
-///
-/// The counter-factual: the residue count cannot see it either. The reload adds
-/// one region to a residue of over a hundred, indistinguishable from the
-/// reference cycle that explains the rest — while the in-degree reading names it
-/// outright, rc=1 against no in-edge at all.
-#[test]
-fn a_cache_hit_leaves_no_unexplained_references() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let cache = StdlibCache::Dir(dir.path().to_path_buf());
-    // The first runtime meets an empty directory, so it compiles and stores.
-    drop(Runtime::with_stdlib_cache(cache.clone()));
-    for src in PROGRAMS {
-        let rt = Runtime::with_stdlib_cache(cache.clone());
-        assert_eq!(
-            rt.stdlib_source(),
-            StdlibSource::Cache,
-            "this runtime must load the stdlib the seeding one stored; a miss \
-             yields a working runtime too, so it would pass the assertion below \
-             without ever exercising the reload"
-        );
-        let pinned = pinned_after_teardown(rt, src);
-        assert!(
-            pinned.is_empty(),
-            "{src}: regions pinned from outside the region graph: {pinned:#?}"
-        );
-    }
-}
-
 /// The same property on the image-boot path (docs/impl/image/boot.md). A whole
 /// boot graph arrives as one hydrated region registered as one process root,
 /// so the sweep either releases all of it or none of it.
@@ -124,14 +87,11 @@ fn a_cache_hit_leaves_no_unexplained_references() {
 #[test]
 fn an_image_boot_leaves_no_unexplained_references() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let caches = || elle::runtime::BootCaches {
-        stdlib: StdlibCache::Dir(dir.path().join("stdlib")),
-        image: elle::image::boot::BootImage::Dir(dir.path().join("boot")),
-    };
+    let image = || elle::image::boot::BootImage::Dir(dir.path().join("boot"));
     // The first runtime meets an empty directory, so it compiles and stores.
-    drop(Runtime::with_caches(caches()));
+    drop(Runtime::with_boot_image(image()));
     for src in PROGRAMS {
-        let rt = Runtime::with_caches(caches());
+        let rt = Runtime::with_boot_image(image());
         assert_eq!(
             rt.boot_source(),
             elle::image::boot::BootSource::Image,
@@ -159,18 +119,13 @@ fn an_image_boot_leaves_no_unexplained_references() {
 /// scheduler wrapper can hold every other survivor while that gate reads clean.
 ///
 /// The run goes through `execute_scheduled`, the path every entry point takes, so
-/// the scheduler wrapper is inside the measurement. The stdlib is compiled rather
-/// than read from the disk cache, so every region in the residue was minted by
-/// this run.
+/// the scheduler wrapper is inside the measurement. The runtime boots from
+/// source, so every region in the residue was minted by this run.
 #[test]
 fn teardown_leaves_no_residue() {
     for src in PROGRAMS {
         assert_eq!(
-            residue_after_teardown(
-                Runtime::with_stdlib_cache(StdlibCache::Off),
-                src,
-                HandOff::Root
-            ),
+            residue_after_teardown(Runtime::from_source(), src, HandOff::Root),
             0,
             "{src}: regions survived teardown — every one is a reference the run \
              never dropped",
@@ -194,10 +149,10 @@ pub(super) enum HandOff {
 /// runtime down, and answer how many regions survived — printing the census
 /// whenever any did.
 ///
-/// The stdlib is compiled rather than read from the disk cache, so every region
-/// in the residue was minted by this run and the verdict does not move with the
-/// state of a cache file. The run goes through `execute_scheduled`, the path
-/// every entry point takes, so the scheduler wrapper is inside the measurement.
+/// A caller that boots `rt` from source makes every region in the residue one
+/// this run minted, whatever an image file holds. The run goes through
+/// `execute_scheduled`, the path every entry point takes, so the scheduler
+/// wrapper is inside the measurement.
 pub(super) fn residue_after_teardown(mut rt: Runtime, src: &str, handoff: HandOff) -> usize {
     let value = {
         let (vm, symbols, cctx) = rt.parts();
@@ -238,11 +193,7 @@ fn a_released_heap_program_value_leaves_no_residue() {
     for answer in ["(list 1 2 3)", "\"str\"", "[1 2 3]", "{:a 1}", "(fn [x] x)"] {
         for src in [answer.to_string(), format!("(begin {answer} nil)")] {
             assert_eq!(
-                residue_after_teardown(
-                    Runtime::with_stdlib_cache(StdlibCache::Off),
-                    &src,
-                    HandOff::Release
-                ),
+                residue_after_teardown(Runtime::from_source(), &src, HandOff::Release),
                 0,
                 "{src}: regions survived teardown after the host released the \
                  program value",

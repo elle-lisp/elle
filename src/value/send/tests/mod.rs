@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 //! What crosses the send boundary intact: closures and their LIR, ports and parameters, names, and the mirrors.
 //!
 //! docs/threads.md
@@ -8,8 +8,8 @@
 //! - `ports` — a parameter and a stdio port cross by identity and by kind.
 //! - `symbols` — a symbol or keyword names the same thing on both sides.
 //! - `payload` — the names a code payload holds outside its values cross too.
-//! - `mirror` — the serde mirror keeps container kinds apart, and the syntax
-//!   mirror rebuilds a tree in the destination's arena.
+//! - `mirror` — the syntax mirror rebuilds a tree in the destination's arena,
+//!   and a received struct ascends in key order.
 
 use super::*;
 use crate::lir::testkit::LirFixture;

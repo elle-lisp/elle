@@ -1,10 +1,13 @@
+// audited: 2026-11-25
 //! The `--trace=scrub` page-blanking diagnostic must not disturb a correct
 //! program.
+//!
+//! docs/impl/region/diagnostics.md
 //!
 //! Scrub zeroes the spans a dying region wrote before its page goes back to the
 //! cache, so a read through a pointer that outlived its region lands on an
 //! all-zero slot and detonates at the deref instead of returning plausible
-//! bytes (docs/impl/region/model.md § "Page recycling").
+//! bytes (docs/impl/region/model.md).
 //!
 //! A diagnostic is only worth its verdict if it changes nothing else, and this
 //! one writes memory. So the pin is the round trip: run allocation-heavy work
@@ -30,12 +33,7 @@ fn run(source: &str) -> String {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_compile_ctx(&mut cctx as *mut elle::pipeline::CompileCtx);
     vm.set_symbols(&mut symbols as *mut SymbolTable);
-    init_stdlib(
-        &mut vm,
-        &mut symbols,
-        &mut cctx,
-        &elle::compiler::stdlib_cache::StdlibCache::Off,
-    );
+    init_stdlib(&mut vm, &mut symbols, &mut cctx);
     match elle::eval_all(source, &mut symbols, &mut vm, &mut cctx, "<scrub>") {
         Ok(v) => format!("{}", v.display_with(Some(&symbols))),
         Err(e) => format!("error: {e}"),

@@ -1,6 +1,6 @@
 # The boot milestone's pins
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-26 -->
 
 The pins the boot milestone landed with, one entry for each subject it brought
 into an image.
@@ -91,8 +91,9 @@ pins hold.
   Two dumps of one boot state write one file, which is determinism at the
   scale where a code payload's padding can leak. Hygiene: an image-booted
   instance tears down to the residue a source-booted one leaves, the whole boot
-  graph released through one root registration. Boot from image running the
-  full smoke corpus identically to source boot is dump-boot's gate.
+  graph released through one root registration. The language suite passes
+  under a source boot in `make smoke-source-boot`, and under an image boot in
+  every other suite pass.
 - Warm cache: a second instance over one directory boots from the image the
   first stored, asserted on the reported boot source, and the stored file is
   the one the policy names. A rejected file is replaced rather than rejected
@@ -120,8 +121,8 @@ pins hold.
 
   Image-booted workers run in sequence give back their mappings: the mapped
   bytes grow by less than one worker's instance across six more of them. The
-  language server stores an image under a cold cache directory and writes no
-  stdlib cache. The WASM entry's host runtime hydrates a stored image.
+  language server stores an image under a cold cache directory. The WASM
+  entry's host runtime hydrates a stored image.
 - Embedded blob: a static in this binary is found in the file that holds it,
   at a 64 KiB-aligned offset, and the bytes there are the static's. Bytes on
   the heap are found in no file. A blob no file holds hydrates from an
@@ -153,7 +154,7 @@ pins hold.
   `the_two_boots_emit_one_bytecode_for_a_user_file` pin the two.
 - Bytecode parity: every corpus file and the standard library write one
   `--dump=bytecode` under an image boot and under a source boot, each in a
-  process of its own (`make bytecode-parity`, which `make smoke-boot-image`
+  process of its own (`make bytecode-parity`, which `make smoke-source-boot`
   runs first). The target refuses to compare until the image start prints its
   `image-hydrate` mark. A fixture that fuses a `map` and reads a qualified key
   holds the same in the Rust suite. The counter-factual is a hydration that

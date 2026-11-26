@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-11-25
+# audited: 2026-11-26
 # Records or checks the bytecode golden, and checks that an image boot compiles the corpus as a source boot does.
 # docs/config.md
 # docs/impl/image/plan.md
@@ -7,9 +7,9 @@
 #
 # The golden is what one binary's emitter wrote. A representation change that
 # must not move one instruction records with the binary before it, and checks
-# with the binary after it. Every run turns the stdlib cache and the boot image
-# off, so a source boot compiles the standard library and mints its static
-# region slots before the file's own, and two runs number them alike. A release
+# with the binary after it. Every run turns the boot image off, so a source
+# boot compiles the standard library and mints its static region slots before
+# the file's own, and two runs number them alike. A release
 # binary carries a blob it would otherwise hydrate. An image boot names its
 # image after that, mints none of the slots, and starts the counter at the
 # image's watermark instead.

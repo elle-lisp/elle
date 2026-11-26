@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-26 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -33,10 +33,10 @@ it never touches the repo.
 
 ### Run history is state, not cache
 
-A cache is what a rebuild can regenerate: the stdlib disk cache and the boot
-image both qualify, and `ELLE_CACHE` is where they belong. A run is a record of
-something that happened once, on one commit, on one machine. Nothing
-regenerates it, so it lives in a state directory instead — on a development box
+A cache is what a rebuild can regenerate: the boot image and the compiled
+WebAssembly modules both qualify, and `ELLE_CACHE` is where they belong. A run
+is a record of something that happened once, on one commit, on one machine.
+Nothing regenerates it, so it lives in a state directory instead — on a development box
 `ELLE_CACHE` is often a tmpfs, and a reboot there erases every run ever
 recorded.
 

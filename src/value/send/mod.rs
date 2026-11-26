@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-26
 //! `SendValue` and `SendBundle`: a value deep-copied so it can cross to another thread.
 //!
 //! docs/threads.md
@@ -18,12 +18,11 @@ use crate::value::types::Arity;
 use std::collections::{BTreeMap, HashMap};
 
 mod de;
-mod mirror;
 mod ser;
 mod syntax;
 
-use de::{into_value_inner, parts_from_sendable, DeserContext, ReconState};
-use ser::{from_value_inner, sendable_from_template, SerContext};
+use de::{into_value_inner, DeserContext, ReconState};
+use ser::{from_value_inner, SerContext};
 use syntax::{send_to_syntax, SendSyntax};
 
 /// Sendable snapshot of a closure: its code object, owned, plus the instance
@@ -37,9 +36,8 @@ use syntax::{send_to_syntax, SendSyntax};
 /// `env` holds the captured environment (upvalues), converted recursively
 /// to `SendValue`. Constants are stored separately in `constants`.
 ///
-/// Public because a `SendBundle` and the stdlib cache's stored form carry it;
-/// only this module builds one.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+/// Public because a `SendBundle` carries it; only this module builds one.
+#[derive(Clone)]
 pub struct SendableClosure {
     pub bytecode: Vec<u8>,
     pub arity: Arity,
@@ -82,7 +80,7 @@ pub struct SendableClosure {
     /// Slot-routed release regions (`ClosureTemplate::frame_release_regions`).
     pub frame_release_regions: Vec<u32>,
     /// The body fragment's bytes, as the payload holds them, so a later
-    /// compile grafts the rebuilt function (docs/impl/stdlib-cache.md).
+    /// compile grafts the rebuilt function (docs/impl/graft.md).
     pub fragment: Vec<u8>,
     /// The record of each captured slot, as the payload holds it, so
     /// `fn/captures` answers on the receiving side as it does here
@@ -203,7 +201,7 @@ pub enum SendValue {
 /// keyed on.
 ///
 /// A [`TableKey`](crate::value::TableKey) holds raw region pointers, so it is
-/// neither `Send` nor serializable; this owns its bytes. There is no `Heap`
+/// not `Send`; this owns its bytes. There is no `Heap`
 /// arm: an identity key (a fiber, a closure, a plugin object) cannot be
 /// reproduced on the far side, and its absence here is what refuses one at the
 /// boundary.
@@ -211,7 +209,7 @@ pub enum SendValue {
 /// The derived `Ord` orders the wire map alone. It is not the order of all
 /// values, so the receiving side sorts a struct's rebuilt entries by
 /// `TableKey` (docs/types.md).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SendKey {
     Nil,
     Bool(bool),
@@ -415,81 +413,6 @@ impl SendBundle {
 
         result
     }
-}
-
-/// A serialized set of code objects — what `SendBundle` is to a value, this is
-/// to a unit's code (the stdlib compilation cache stores one).
-///
-/// A struct rather than a tuple, because `templates` and `intern_table` have the
-/// same type. As positional arguments they are swappable at every call site
-/// with no compile error, and a swap would resolve every `Ref(idx)` against the
-/// wrong table.
-pub(crate) struct SendTemplates {
-    /// The code objects themselves, in the order they were serialized.
-    pub(crate) templates: Vec<SendableClosure>,
-    /// Live closure instances lifted out of the templates' constant pools,
-    /// referenced from the templates by `SendValue::Ref(idx)`.
-    pub(crate) intern_table: Vec<SendableClosure>,
-    /// Spelling table, the same one a `SendBundle` carries. Ids are name
-    /// hashes and need no translation; the names are what the loading instance
-    /// must learn in order to print them.
-    pub(crate) names: Vec<(u64, Box<str>)>,
-}
-
-/// Serialize a list of code objects (a unit's entry) into owned
-/// `SendableClosure`s, for the stdlib compilation cache.
-///
-/// `env`/`squelch_mask` are empty. A code object has no heap identity to
-/// intern, so each is emitted inline and its child table recurses. Closure
-/// constants *inside* a constant pool are live heap instances and intern into
-/// the returned `intern_table` — the reconstructed code objects reference it
-/// by `Ref(idx)`.
-pub(crate) fn serialize_templates(
-    code: &[&crate::value::ClosureTemplate],
-    heap: &crate::value::fiberheap::FiberHeap,
-    symbols: &crate::symbol::SymbolTable,
-) -> Result<SendTemplates, String> {
-    let mut ctx = SerContext::new(heap, Some(symbols));
-    let mut templates = Vec::with_capacity(code.len());
-    for t in code {
-        templates.push(sendable_from_template(t, &mut ctx)?);
-    }
-    let names = ctx.take_names();
-    Ok(SendTemplates {
-        templates,
-        intern_table: ctx.closures,
-        names,
-    })
-}
-
-/// Reconstruct code objects from a [`SendTemplates`] as the fields of their
-/// payloads, each one's children written into `code` and named by its child
-/// table. The intern table is shared across all of them so `Ref(idx)` entries
-/// (closure constants) resolve.
-///
-/// `Alloc` is the receiving context's allocation capability: every rebuilt
-/// value is born in its region, and so is the code object of every closure
-/// among them.
-///
-/// The name table replays into `symbols`, the receiving instance's display
-/// memo, exactly as `SendBundle::into_value` does. Nothing else about a symbol
-/// needs carrying: an id is its name's hash, so a symbol constant in the LIR or
-/// in the pool means the same symbol here as where it was stored.
-pub(crate) fn deserialize_templates(
-    stored: SendTemplates,
-    alloc: &mut crate::primitives::ctx::Alloc<'_>,
-    symbols: &mut crate::symbol::SymbolTable,
-    code: crate::value::CodeArena,
-) -> Vec<crate::value::PayloadParts> {
-    for (hash, name) in &stored.names {
-        symbols.record_spelling(*hash, name);
-    }
-    let mut dctx = DeserContext::new(stored.intern_table, alloc);
-    stored
-        .templates
-        .into_iter()
-        .map(|sc| parts_from_sendable(sc, &mut dctx, code))
-        .collect()
 }
 
 #[cfg(test)]

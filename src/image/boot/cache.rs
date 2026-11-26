@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! The boot-image policy and the warm cache: which images an instance reads,
 //! where a compiled boot stores one, and what a store leaves behind.
 //!
@@ -95,7 +95,7 @@ impl BootImage {
 }
 
 /// The running executable, as the warm cache keys its image: by the build
-/// identity, which the stdlib cache keys on too.
+/// identity.
 pub(crate) struct Executable {
     len: u64,
     mtime: u128,
@@ -121,7 +121,7 @@ impl Executable {
     }
 
     /// The build identity: the executable's length and modification time
-    /// (docs/impl/stdlib-cache.md argues for both).
+    /// (docs/impl/image/boot.md argues for both).
     pub(crate) fn identity(&self) -> (u64, u128) {
         (self.len, self.mtime)
     }

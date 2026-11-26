@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-25
 //! A value read out of an env cell must outlive the reader that consumes it.
 //!
 //! Every shape below reads a captured binding back through its env cell and
@@ -31,12 +31,7 @@ fn run(source: &str) -> String {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_compile_ctx(&mut cctx as *mut elle::pipeline::CompileCtx);
     vm.set_symbols(&mut symbols as *mut SymbolTable);
-    init_stdlib(
-        &mut vm,
-        &mut symbols,
-        &mut cctx,
-        &elle::compiler::stdlib_cache::StdlibCache::Off,
-    );
+    init_stdlib(&mut vm, &mut symbols, &mut cctx);
     match elle::eval_all(source, &mut symbols, &mut vm, &mut cctx, "<cell-borrow>") {
         Ok(v) => format!("{}", v.display_with(Some(&symbols))),
         Err(e) => format!("error: {e}"),

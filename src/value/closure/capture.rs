@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-26
 //! `CaptureFact`: one captured slot's binding and whether code assigns it, as a payload record with every byte written.
 //!
 //! docs/impl/region/template.md
@@ -15,7 +15,7 @@ use crate::value::SymbolId;
 /// The name is a `SymbolId`'s word rather than the `SymbolId` itself, so the
 /// record's layout is its fields, every byte written. The flag is a byte, so
 /// a record an image maps holds no bit pattern a read could not take.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct CaptureFact {
     pub(crate) name: u64,

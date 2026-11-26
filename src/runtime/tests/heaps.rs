@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-25
 //! Which heap compiles a unit and which heap runs it, on every path a compiled unit reaches a VM.
 //!
 //! docs/impl/region/template.md
@@ -102,26 +102,6 @@ fn the_scheduled_entry_runs_on_the_instance_heap() {
     };
     assert!(payload_on(rt.heap(), value));
     crate::value::arena::release_program_value(rt.heap(), value);
-}
-
-#[test]
-fn a_stdlib_cache_hit_rebuilds_the_library_on_the_loading_heap() {
-    // The cache hit deserializes on the VM that runs the library, not on the
-    // compile context's macro VM.
-    let dir = tempfile::tempdir().expect("a scratch directory");
-    let cache = crate::compiler::stdlib_cache::StdlibCache::Dir(dir.path().to_path_buf());
-    drop(Runtime::with_stdlib_cache(cache.clone()));
-    let mut rt = Runtime::with_stdlib_cache(cache);
-    assert_eq!(
-        rt.stdlib_source(),
-        crate::primitives::module_init::StdlibSource::Cache,
-        "the second instance must load the first one's cache"
-    );
-    let map = rt
-        .compile()
-        .lookup_stdlib_value(crate::value::SymbolId::of("map"))
-        .expect("the stdlib exports map");
-    assert!(payload_on(rt.heap(), map));
 }
 
 #[test]

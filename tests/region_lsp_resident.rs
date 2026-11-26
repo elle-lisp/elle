@@ -1,12 +1,13 @@
-//! Regression guard: the LSP's resident-VM analysis path is region-clean.
+// audited: 2026-11-25
+//! The resident-VM analysis loop the language server runs stays region-clean under guardfree.
 //!
-//! The use-after-free "demonstrated by lsp" is NOT in the LSP's own usage
-//! pattern. The LSP holds
-//! ONE resident VM (`CompilerState`, src/lsp/state.rs) that runs `init_stdlib`
-//! exactly once, then loops `analyze_file` per document change. That pattern is
-//! region-safe. This test reproduces it directly with `--trace=guardfree`
-//! armed (the reliable UAF oracle: freed pages are mprotect(PROT_NONE)'d and
-//! never reused, so the FIRST real use-after-free SIGSEGVs at the exact deref).
+//! docs/impl/region/diagnostics.md
+//!
+//! The language server holds one resident instance and runs `analyze_file`
+//! on every document change (src/lsp/state.rs). This test runs that loop on a
+//! VM that loads its stdlib once through `init_stdlib`, with
+//! `--trace=guardfree` armed. Guardfree protects every freed page and never
+//! reuses it, so the first use-after-free faults at the exact deref.
 //!
 //! Macro-heavy inputs are used on purpose: nested macro expansion (`forever`,
 //! `try`, `defer`, `with`, user `defmacro`) is the documented trigger for the
@@ -28,7 +29,7 @@ fn lsp_resident_analyze_is_region_clean_under_guardfree() {
     cfg.trace_keywords.push("guardfree".to_string());
     elle::config::init(cfg);
 
-    // Mirror CompilerState::new(): one resident VM, init_stdlib ONCE.
+    // One resident VM, which loads its stdlib once.
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
     let _ = register_primitives(&mut vm, &mut symbols);
@@ -39,12 +40,7 @@ fn lsp_resident_analyze_is_region_clean_under_guardfree() {
     let mut cctx = elle::pipeline::CompileCtx::new();
     vm.set_compile_ctx(&mut cctx as *mut elle::pipeline::CompileCtx);
     vm.set_symbols(&mut symbols as *mut SymbolTable);
-    init_stdlib(
-        &mut vm,
-        &mut symbols,
-        &mut cctx,
-        &elle::compiler::stdlib_cache::StdlibCache::Off,
-    );
+    init_stdlib(&mut vm, &mut symbols, &mut cctx);
 
     // Mirror compile_document(): re-analyze on every "change", reusing the
     // resident VM and its per-instance compile context across iterations.

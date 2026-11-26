@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! The 16-byte tagged-union `Value`: its tags, its immediate predicates, and its scalar serde.
 //!
 //! docs/impl/values.md
@@ -316,19 +316,19 @@ impl Value {
 }
 
 // =============================================================================
-// Scalar serialization (used by the stdlib compilation cache)
+// Scalar serialization (body fragments)
 // =============================================================================
 //
-// The cache serializes a code object's pool and the values its LIR
-// `ValueConst`s load as `SendValue`s, so the send walk has already copied out
-// every heap value. The values that reach this path are scalars (int, float,
-// bool, nil, the empty list, symbol, keyword) and native-fn immediates. A
-// symbol and a keyword carry their name's hash, which is the same in every
-// process. The payload travels as it stands, and only the spelling needs the
-// bundle's name table. Every malformed input must come back as a serde error,
-// never a panic, because the cache layer turns an error into a miss and
-// recompiles. `ScalarPayload`'s single derived enum tag makes an out-of-range
-// discriminant a native bincode error.
+// HIR derives serde so a body fragment can be encoded (docs/impl/graft.md),
+// and a node that holds a datum holds a `Value`. Only a scalar crosses: int,
+// float, bool, nil, the empty list, symbol, keyword, and a native-fn
+// immediate. A symbol and a keyword carry their name's hash, which is the same
+// in every process. A prim id is valid against the primitive tables of the
+// build that wrote it, and a boot image, which carries fragments to another
+// process, keys on that build. Every malformed input must come back as a serde
+// error, never a panic: a fragment that does not decode is a body the payload
+// does not carry. `ScalarPayload`'s single derived enum tag makes an
+// out-of-range discriminant a native bincode error.
 impl serde::Serialize for Value {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::Error;
@@ -342,8 +342,8 @@ impl serde::Serialize for Value {
         } else if let Some(b) = self.as_bool() {
             ScalarPayload::Bool(b)
         } else if self.is_native_fn() {
-            // Native-fn payload is a prim_id, stable across processes as long
-            // as the cache key mixes in the primitive-table identity.
+            // A native-fn payload is a prim_id, which names one def in every
+            // process of one build.
             ScalarPayload::NativeFn(self.payload as u32)
         } else if self.is_nil() {
             ScalarPayload::Nil
@@ -372,10 +372,8 @@ impl<'de> serde::Deserialize<'de> for Value {
             ScalarPayload::Keyword(hash) => Value::keyword_from_hash(hash),
             ScalarPayload::NativeFn(id) => match crate::primitives::prim_def(id) {
                 Some(def) => Value::native_fn(def),
-                // A cache written by a process whose primitive registry
-                // differs (feature set, prim tables) is a stale file, not a
-                // reason to crash. Report the error so the cache layer treats
-                // it as a miss and recompiles.
+                // Bytes a build with other primitive tables wrote are no
+                // body, not a reason to crash.
                 None => return Err(serde::de::Error::custom(format!("unknown prim id {id}"))),
             },
         })

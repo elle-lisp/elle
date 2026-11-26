@@ -37,7 +37,6 @@ Up: [..](../AGENTS.md)
 - [solver.md](solver.md) — **The signal solver** Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 - [spares.md](spares.md) — **Spares** A warm interpreted call allocates nothing on the Rust heap: it reuses the buffers and environments earlier calls gave back.
 - [spirv.md](spirv.md) — **SPIR-V Backend** Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.
-- [stdlib-cache.md](stdlib-cache.md) — **Standard Library Disk Cache** A start that finds the compiled standard library on disk deserializes it instead of compiling it again.
 - [symbol.md](symbol.md) — **Symbols and keywords — identity is the name hash** A `SymbolId` is the 64-bit FNV-1a hash of the symbol's name.
 - [syntax.md](syntax.md) — **Syntax — a region-native immutable tree** The pre-analysis tree the reader produces, the expander rewrites, and the analyzer consumes.
 - [typeinfer.md](typeinfer.md) — **Type inference: the ascent, and what a call proves** Where the types come from: an ascent from below whose limit is the least fixpoint, and what each kind of call contributes to it.

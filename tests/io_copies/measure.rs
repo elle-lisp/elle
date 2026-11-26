@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-25
 //! The Rust heap bytes a stream read or write allocates per byte it moves,
 //! counted on every thread, for the io_copies binary.
 //!
@@ -62,8 +62,8 @@ const LARGE: usize = 9 << 20;
 /// Take the runtime's configuration before anything reads it.
 ///
 /// The trap: three things allocate at times of their own and swamp the gauge.
-/// The JIT and MLIR compile in the background. The stdlib disk cache is written
-/// by one runtime and read by the next, which moved a reading by hundreds of
+/// The JIT and MLIR compile in the background. A disk cache is written by one
+/// runtime and read by the next, which moved a reading by hundreds of
 /// megabytes and made it negative. All three are off here.
 pub fn configure() {
     elle::config::init(elle::config::Config {

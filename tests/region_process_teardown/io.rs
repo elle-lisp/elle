@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! The residue gates of a run that reaches the io backend or the scheduler.
 //!
 //! docs/impl/region/rules.md
@@ -6,7 +6,6 @@
 
 use super::census::{residue_after_teardown, HandOff};
 use super::*;
-use elle::compiler::stdlib_cache::StdlibCache;
 
 /// A run that spawns a child leaves nothing either. The `subprocess` value is
 /// built when the spawn finishes rather than by the call that asked for it, so
@@ -28,11 +27,7 @@ fn a_run_that_spawns_a_child_leaves_no_residue() {
     let src = "(let [p (subprocess/exec \"/bin/sh\" [\"-c\" \":\"])] \
                (subprocess/wait p))";
     assert_eq!(
-        residue_after_teardown(
-            Runtime::with_stdlib_cache(StdlibCache::Off),
-            src,
-            HandOff::Root
-        ),
+        residue_after_teardown(Runtime::from_source(), src, HandOff::Root),
         0,
         "{src}: regions survived teardown",
     );
@@ -65,11 +60,7 @@ fn a_run_that_spawns_a_child_leaves_no_residue() {
 fn a_run_that_times_out_leaves_no_residue() {
     let src = "(ev/timeout 30 (fn [] 1))";
     assert_eq!(
-        residue_after_teardown(
-            Runtime::with_stdlib_cache(StdlibCache::Off),
-            src,
-            HandOff::Root
-        ),
+        residue_after_teardown(Runtime::from_source(), src, HandOff::Root),
         0,
         "{src}: regions survived teardown",
     );
@@ -99,11 +90,7 @@ fn a_run_that_leaves_a_fiber_sleeping_leaves_no_residue() {
                         (ev/spawn (fn [] (ev/sleep 30))) 1))",
     ] {
         assert_eq!(
-            residue_after_teardown(
-                Runtime::with_stdlib_cache(StdlibCache::Off),
-                src,
-                HandOff::Root
-            ),
+            residue_after_teardown(Runtime::from_source(), src, HandOff::Root),
             0,
             "{src}: regions survived teardown",
         );
@@ -127,11 +114,7 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
         path.display()
     );
     assert_eq!(
-        residue_after_teardown(
-            Runtime::with_stdlib_cache(StdlibCache::Off),
-            &src,
-            HandOff::Root
-        ),
+        residue_after_teardown(Runtime::from_source(), &src, HandOff::Root),
         0,
         "{src}: regions survived teardown",
     );
@@ -155,11 +138,7 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
 fn a_run_that_captures_what_a_child_wrote_leaves_no_residue() {
     let src = "(get (subprocess/system \"/bin/sh\" [\"-c\" \"echo census\"]) :exit)";
     assert_eq!(
-        residue_after_teardown(
-            Runtime::with_stdlib_cache(StdlibCache::Off),
-            src,
-            HandOff::Root
-        ),
+        residue_after_teardown(Runtime::from_source(), src, HandOff::Root),
         0,
         "{src}: regions survived teardown",
     );
@@ -187,11 +166,7 @@ fn a_run_with_several_thunks_leaves_no_residue() {
         "(ev/run (fn [] 1) (fn [] 2) (fn [] 3))",
     ] {
         assert_eq!(
-            residue_after_teardown(
-                Runtime::with_stdlib_cache(StdlibCache::Off),
-                src,
-                HandOff::Root
-            ),
+            residue_after_teardown(Runtime::from_source(), src, HandOff::Root),
             0,
             "{src}: regions survived teardown",
         );

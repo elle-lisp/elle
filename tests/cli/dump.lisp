@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-24
+## audited: 2026-11-25
 ## The `--dump=STAGE[,STAGE,...]` surface: each stage prints its banner and the markers its artifact is read by.
 ## tests/cli/overview.md
 ## docs/config.md
@@ -47,9 +47,9 @@
       (assign last i))))
 
 # The bytecode golden compares a recorded dump with a fresh one, so one file
-# prints one text whatever the run. The stdlib cache and the boot image are
-# off, so each run compiles the standard library and mints its static region
-# slots before the file's own. The counter-factual iterates the emitter's
+# prints one text whatever the run. The boot image is off, so each run
+# compiles the standard library and mints its static region slots before the
+# file's own. The counter-factual iterates the emitter's
 # location map or prints a constant's address, and two runs disagree.
 (eprintln "scenario: the bytecode dump prints one text across two runs")
 (let [src (string "(defn sq [x] (* x x))\n(def words '(alpha \"beta\" :gamma))\n"

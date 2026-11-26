@@ -1,7 +1,7 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 //! `(environment)` reifies the bindings in scope in one order, whatever the run.
 //!
-//! docs/impl/stdlib-cache.md
+//! docs/impl/image/boot.md
 
 use super::*;
 
@@ -29,7 +29,8 @@ fn reified_keys(hir: &Hir) -> Vec<crate::value::SymbolId> {
 }
 
 /// The front end is deterministic: one source compiles to one bytecode, which is
-/// what lets the stdlib cache and the bytecode golden stand in for a compile.
+/// what lets the boot gate's bytecode parity and the bytecode golden stand in
+/// for a compile.
 /// The counter-factual is the scope's binding map iterated as it lies: every
 /// map hashes with its own random keys, so two compiles of one scope order the
 /// reified bindings differently, and so emit different bytecode. A sequential

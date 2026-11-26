@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [README.md](README.md) — **Compiler** The bytecode instruction set, the buffer the emitter writes it into, and the disk cache for the compiled standard library.
+- [README.md](README.md) — **Compiler** The bytecode instruction set, and the buffer the emitter writes it into.

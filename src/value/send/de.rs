@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-26
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 //!
@@ -100,7 +100,7 @@ impl<'a, 'h> DeserContext<'a, 'h> {
 ///
 /// The constants and the LIR's values are rebuilt through the ordinary value
 /// walk, so they land in the call's region whatever `code` names.
-pub(in crate::value::send) fn parts_from_sendable(
+fn parts_from_sendable(
     sc: SendableClosure,
     ctx: &mut DeserContext<'_, '_>,
     code: CodeArena,

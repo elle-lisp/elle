@@ -1,11 +1,11 @@
-// audited: 2026-11-21
+// audited: 2026-11-26
 //! `LirCode` and `LirOwned`: a frozen function's records in `Vec`s, and the values its instructions load.
 //!
 //! docs/impl/lir.md
 //!
-//! `LirCode` is plain data: `Send`, and serializable, so it crosses a thread
-//! or a file as it stands. The values a `ValueConst` loads are heap pointers
-//! and are neither, so they ride beside it in `LirOwned`.
+//! `LirCode` is plain data and `Send`, so it crosses a thread as it stands.
+//! The values a `ValueConst` loads are heap pointers and are not `Send`, so
+//! they ride beside it in `LirOwned`.
 
 use super::record::{BlockRec, ConstRec, Node, SiteRec};
 use crate::hir::region::StaticRegion;
@@ -16,7 +16,7 @@ use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
 
 /// A frozen function's records, tables and header.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct LirCode {
     pub(crate) nodes: Vec<Node>,
     pub(crate) blocks: Vec<BlockRec>,
@@ -25,9 +25,7 @@ pub struct LirCode {
     /// The `MaterializeConst` templates, as `ConstTemplate::encode` wrote them.
     pub(crate) data: Vec<u8>,
     /// The files the spans name, each once. A span's `file` field is one past
-    /// its index here. A `FileId` is process-local, so the table serializes by
-    /// spelling.
-    #[serde(with = "file_names")]
+    /// its index here.
     pub(crate) files: Vec<FileId>,
     /// How many values the `ValueConst` instructions index, so a `LirOwned`
     /// rebuilt from parts can check it holds them all.
@@ -53,21 +51,15 @@ pub struct LirCode {
     pub(crate) merged_slots: Vec<StaticRegion>,
     pub(crate) frame_release_slots: Vec<u16>,
     pub(crate) frame_release_regions: Vec<StaticRegion>,
-    /// The code payload carries the docstring, the origin, the body fragment
-    /// and the capture record, and nothing reads them off a serialized
-    /// function, so none of the four crosses.
-    #[serde(skip)]
+    /// What the code payload carries and the JIT never reads: the docstring,
+    /// the origin, the body fragment and the capture record.
     pub(crate) doc: Option<String>,
-    #[serde(skip)]
     pub(crate) origin: Option<Span>,
-    #[serde(skip)]
     pub(crate) fragment: Vec<u8>,
-    #[serde(skip)]
     pub(crate) captures: Vec<crate::value::closure::CaptureFact>,
     /// The binding each local slot holds, which the lowerer records and only
     /// the data form reads (docs/spec/form.md). No payload holds it, so it
-    /// neither crosses nor survives a copy out of one.
-    #[serde(skip)]
+    /// does not survive a copy out of one.
     pub(crate) slot_names: Vec<Option<SymbolId>>,
 }
 
@@ -189,24 +181,4 @@ fn site(
 pub struct FrozenModule {
     pub entry: LirOwned,
     pub closures: Vec<LirOwned>,
-}
-
-/// Serde for a file table: each `FileId` travels as its spelling and is
-/// interned again where it lands, as a `Span`'s file is.
-mod file_names {
-    use crate::syntax::files::{self, FileId};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub(super) fn serialize<S: Serializer>(ids: &[FileId], ser: S) -> Result<S::Ok, S::Error> {
-        let names: Vec<&str> = ids
-            .iter()
-            .map(|id| files::name(*id).unwrap_or(""))
-            .collect();
-        names.serialize(ser)
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<FileId>, D::Error> {
-        let names: Vec<String> = Vec::deserialize(de)?;
-        Ok(names.iter().map(|n| files::intern(n)).collect())
-    }
 }

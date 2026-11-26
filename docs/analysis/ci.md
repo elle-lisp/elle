@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-11-25 -->
+<!-- audited: 2026-11-26 -->
 
 CI structure and failure diagnosis.
 
@@ -22,7 +22,7 @@ set when the diff moves only the submodule pointer.
 | Default Build Tests (rig) | ubuntu | The producer pass, `smoke-impl` and `smoke-eager` on the default build's rig | — |
 | Default Build Tests (charge) | ubuntu | `smoke-charge` on the default build's rig | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
-| Boot Image Tests | ubuntu | `smoke-boot-image` — bytecode parity between the two boots, then the language suite booted from an image | — |
+| Source Boot Tests | ubuntu | `smoke-source-boot` — bytecode parity between the two boots, then the language suite booted from source | — |
 | Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
 | Thread-Pool I/O Tests | ubuntu | `smoke-pool-producers`, `smoke-pool`, `smoke-pool-impl` — both suites on a build without `uring` and its rig | — |
 | MLIR Tests | ubuntu | `smoke-mlir-producers`, `doctest`, `smoke-mlir`, `smoke-mlir-impl` — the language suite on the MLIR build, the implementation suite on its rig | — |
@@ -167,15 +167,15 @@ builds it too. The profile is the dev profile with the workspace crates at
 `opt-level = 2`. Most of the Rust suite's time goes to the `elle` processes its
 tests start, and each one at `opt-level = 0` runs about ten times slower. The
 profile keeps debug assertions, so the region checks still run. Each test
-runtime and each process it starts caches its standard library under the
-runner's `HOME` ([config](../config.md)).
+runtime and each process it starts reads its boot image from the warm cache
+under the runner's `HOME` ([config](../config.md)).
 
 A release `make elle` embeds a boot image in the binaries it builds, so every
-corpus job's `elle` and `elle-rig` hydrate it at every start
-([blob.md](../impl/image/blob.md)).
+corpus job's `elle` and `elle-rig` hydrate it at every start that does not
+pass `--boot-image=off` ([blob.md](../impl/image/blob.md)).
 
 Eight jobs change the release profile they build. The `Default Build Tests`
-jobs, the `macOS Smoke` jobs, `Boot Image Tests` and `Thread-Pool I/O Tests`
+jobs, the `macOS Smoke` jobs, `Source Boot Tests` and `Thread-Pool I/O Tests`
 set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`, which is what compiles the region
 checks in. Those checks are
 `#[cfg(debug_assertions)]`, so a corpus job without the flag drives the whole
@@ -270,16 +270,15 @@ another's. Pass `CORPUS_BATCH=` to override it for one run.
 that runs the language suite builds the plugins that suite loads first.
 [The plugins submodule in CI](plugins.md) holds the argument for both.
 
-### The boot-image job
+### The source-boot job
 
-Every release `make elle` proves that its embedded blob hydrates. A start that
-cannot hydrate boots from source, so the suites pass either way. No other job
-proves that the warm cache hydrates, and none compares the two boots' bytecode.
-So `Boot Image Tests` runs `make smoke-boot-image`
+Every other corpus job boots from an image: the blob, or the warm cache on a
+build that carries none. The source boot is what writes the blob, and no other
+job runs a suite on it or compares its bytecode with an image boot's. So
+`Source Boot Tests` runs `make smoke-source-boot`
 ([boot.md](../impl/image/boot.md) owns the gate). It sets
 `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` for the reason the two backend jobs
-do: a hydrated region is a region, and the region checks are compiled out of a
-release build without the flag.
+do: the region checks are compiled out of a release build without the flag.
 
 ### A corpus job's results leave the runner
 
@@ -334,7 +333,7 @@ the third is.
 | **Language suite fails** | A corpus job fails `smoke-lang` | A language test answers differently on that build. | Run `./target/release/elle tests/lang/failing.lisp` on the same build. Check the assertion message; a file that passes on one build and fails on another has found a defect in the build that fails. |
 | **Implementation suite fails** | `Default Build Tests (rig)` fails `smoke-impl` or `smoke-eager` | An implementation test on the rig, or a suite file under the eager profile. | Run `./target/release/elle-rig tests/impl/failing.lisp`; the file's sidecar sets its mode. For a profile failure, pass the same `--profile`. |
 | **The embedded blob fails** | A corpus job fails on `make elle` after the second build | The second build's dump differs from the blob it carries, so the two builds compiled the library differently. Or a start did not map the blob from its own executable. | Run `make elle CARGO_PROFILE=--release` locally. A dump difference keeps both files to `cmp`. Otherwise read the `--trace=boot` lines it prints: `blob-copy` names a blob the start could not find in its own file. |
-| **Boot from an image fails** | `Boot Image Tests` fails and every other corpus job passes | A corpus file compiles to other bytecode or answers differently under a hydrated boot, or the image no longer hydrates. | Run `make smoke-boot-image` locally. A parity failure names the files that differ and keeps both dumps of each under `target/bytecode-parity`; diff a pair. Otherwise read the hydration proof first: a target that fails there never reached the corpus. |
+| **Boot from source fails** | `Source Boot Tests` fails and every other corpus job passes | A corpus file compiles to other bytecode under the two boots, or answers differently under a source boot. Or the warm cache no longer hydrates, or the binary ignores `--boot-image=off`. | Run `make smoke-source-boot` locally. A parity failure names the files that differ and keeps both dumps of each under `target/bytecode-parity`; diff a pair. A boot proof that fails prints the start's `--trace=boot` lines. Otherwise run the failing file with `--boot-image=off`. |
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
 | **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, or banned wording. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |

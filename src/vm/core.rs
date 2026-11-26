@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-26
 //! The `VM` struct: the per-instance state a running program reaches.
 //!
 //! docs/impl/vm.md
@@ -45,10 +45,9 @@ pub struct VM {
     /// worker compiles names them as code compiled here does (docs/threads.md).
     pub(crate) host_primitives: Vec<&'static crate::primitives::def::PrimitiveDef>,
     /// What a worker spawned from this instance boots from: the image this
-    /// instance holds, and the stdlib cache a worker compiles through. Recorded
-    /// by the boot, and read by `sys/spawn`: a worker builds its own runtime on
-    /// a new thread and reaches the spawning instance only through `ctx.vm()`
-    /// (docs/impl/image/boot.md).
+    /// instance holds, if it holds one. Recorded by the boot, and read by
+    /// `sys/spawn`: a worker builds its own runtime on a new thread and reaches
+    /// the spawning instance only through `ctx.vm()` (docs/impl/image/boot.md).
     pub(crate) worker_boot: crate::runtime::WorkerBoot,
     /// Pointer to this instance's heap. The VM does not own it: a `RuntimeCore`
     /// owns it as a sibling `Box<FiberHeap>` (`VM::new_with_heap`), or — for a bare
