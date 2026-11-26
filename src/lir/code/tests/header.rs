@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 //! A frozen function keeps its header, its blocks in order, its terminators and spans, and its sites.
 //!
 //! docs/impl/lir.md
@@ -198,9 +198,8 @@ fn sites_set_after_freezing_read_back() {
     assert!(view.charge_site(1).is_none());
 }
 
-/// The plain-data half serializes and reloads — the stdlib cache and `send`
-/// both rely on it — and a file crosses by spelling, so it names the same file
-/// wherever it lands.
+/// The plain-data half serializes and reloads, and a file crosses by
+/// spelling, so it names the same file wherever it lands.
 #[test]
 fn the_code_survives_serialization() {
     let mut heap = FiberHeap::new();

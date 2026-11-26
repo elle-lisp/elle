@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-25
 //! The warm cache's file name: one per source digest and build, and none for a binary that cannot identify itself.
 //!
 //! docs/impl/image/boot.md
@@ -24,9 +24,8 @@ fn two_builds_name_one_digests_image_apart() {
 }
 
 // docs/impl/image/boot.md: a binary that cannot read its own identity reads
-// and writes no image, as the stdlib cache declines to cache. Falling back to
-// the digest alone would bring back the confusion the identity exists to
-// prevent.
+// and writes no image. Falling back to the digest alone would bring back the
+// confusion the identity exists to prevent.
 #[test]
 fn a_binary_with_no_identity_has_no_image_path() {
     let policy = BootImage::Dir(PathBuf::from("/nowhere/boot"));

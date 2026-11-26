@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-25
 # The page-claims tool: how it ranks a callgrind file, reads its arguments, and plans the commands and the directory of one run.
 # tools/pageclaims/overview.md
 #
@@ -147,11 +147,11 @@
         "two runs at once keep their files apart")
 
 # ── commands ────────────────────────────────────────────────────────────────
-# The trap: the profiled elle shares the default stdlib cache with every other
-# elle, and a store by one binary removes the others' files. Profiled against
-# that cache, one program read 4175 page claims on one run and 1729 on the
+# The trap: the profiled elle shares the default cache with every other elle,
+# and a store by one binary removes the others' files. Profiled against a
+# shared cache, one program read 4175 page claims on one run and 1729 on the
 # next. So both commands name a cache inside the run's own directory, and the
-# warm-up fills it before callgrind runs.
+# warm-up stores a boot image in it before callgrind runs.
 
 (def planned (commands given "run"))
 (assert (= (get planned :out) "run/callgrind.out")
