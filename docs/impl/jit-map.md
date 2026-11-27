@@ -17,7 +17,8 @@ The label is the function's declared name and the place it was written, as
 `name@file:line:col`, and a function with no declared name gets the place
 alone. The place is the origin `(meta/origin f)` reports. A function with no
 origin falls back to `ClosureTemplate::display_label`, the name or the
-smallest-offset source location.
+smallest-offset source location. `registry::label` builds the label from the
+code object.
 
 Lowering names a `fn` only when it initializes a `def` or `letrec` binding,
 and functions often share a name: the standard library binds many `letrec`
