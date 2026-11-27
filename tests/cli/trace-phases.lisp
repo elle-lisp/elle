@@ -1,8 +1,8 @@
-(elle/epoch 18)
-## audited: 2026-11-22
+(elle/epoch 19)
+## audited: 2026-11-27
 ## `--trace=boot` marks each boot phase and `--trace=compile` each pipeline phase, each with its duration.
 ## tests/cli/overview.md
-## docs/config.md
+## docs/analysis/debugging.md
 ##
 ## Each mark prints as `[trace:...] <label> <N>ms` on stderr. The trap:
 ## `--trace=` refuses an unknown keyword, so a binary without the `boot` keyword

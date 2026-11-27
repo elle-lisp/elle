@@ -1,8 +1,8 @@
-(elle/epoch 18)
-## audited: 2026-11-22
+(elle/epoch 19)
+## audited: 2026-11-27
 ## The binary refuses an unknown trace keyword before the program runs, and lists every keyword it accepts.
 ## tests/cli/overview.md
-## docs/config.md
+## docs/analysis/debugging.md
 
 (include-file "../runner/lib/harness.lisp")
 

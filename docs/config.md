@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-11-26 -->
+<!-- audited: 2026-11-27 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -87,68 +87,10 @@ One number feeds every surface that names a version: `[package] version` in
 `--version`, the `--help` banner, the REPL greeting and the language server's
 `serverInfo` all render that constant.
 
-### Trace flags
+### Tracing
 
-`--trace` takes a comma-separated list of trace keywords:
-
-```bash
-elle --trace=call script.lisp        # trace function calls
-elle --trace=call,signal script.lisp # trace calls and signals
-elle --trace=all script.lisp         # trace everything
-```
-
-Available trace keywords:
-
-| Keyword | Description |
-|---------|-------------|
-| `:call` | Function calls: name, arg count, dispatch decision |
-| `:signal` | Signal dispatch: bits received, squelch, capability denial |
-| `:compile` | Compilation: phase entry/exit with timing |
-| `:fiber` | Fiber operations: resume, swap, status transitions |
-| `:hir` | HIR analysis: binding resolution, signal inference |
-| `:lir` | LIR lowering: slot allocation, capture cells |
-| `:emit` | Bytecode emission |
-| `:jit` | JIT compilation: decisions, rejections, batch compilation |
-| `:io` | I/O operations |
-| `:import` | Plugin loads: the path each `import/load-plugin` call loads |
-| `:macro` | Macro expansion |
-| `:wasm` | WASM backend: host calls, compilation |
-| `:capture` | Capture analysis decisions |
-| `:arena` | Heap allocation, region enter/exit |
-| `:escape` | Escape analysis decisions |
-| `:bytecode` | Bytecode dump before execution |
-| `:posix` | POSIX-signal subsystem (os/sig-* primitives, signalfd/kqueue) |
-| `:chan` | Channel wake protocol (register/deregister, send wake) |
-| `:rc` | Reference-count operations on regions |
-| `:regions` | Region inference and lifetime decisions |
-| `:anf` | A-normal form lift pass |
-| `:pages` | Region page allocation |
-| `:boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile/execute, the boot image's hydrate and store, and whether the embedded blob was mapped or copied (string-traced, no bit) |
-| `:census` | Post-boot heap census: per-tag object counts and bytes, capture cells, pointer-slot density, unsealed variants (string-traced, no bit; see [sealing.md](impl/image/sealing.md)) |
-| `:free` | Region free diagnostics (string-traced, no bit) |
-| `:guardfree` | Guarded-free diagnostics (string-traced, no bit) |
-| `:freebt` | Free backtrace diagnostics (string-traced, no bit) |
-| `:scrub` | Zero a freed page's body so a stale deref lands on a tag no live value carries (string-traced, no bit) |
-| `:residue` | Teardown leak dump: the surviving regions and their cross-region edges (string-traced, no bit) |
-| `:park` | Park and resume diagnostics: every suspended-frame park and every frame replay, with the frame's shape (string-traced, no bit) |
-| `:syncjit` | Compile with Cranelift on the VM thread instead of the background worker (string-traced, no bit) |
-
-The CLI rejects unknown keywords and lists valid names in the error. Elle code
-can still set unknown trace keywords for forward compatibility.
-
-Each trace line goes to stderr as `[trace:KEYWORD] message`.
-
-### Old flags (aliases)
-
-Elle keeps the old `--debug-*` flags as aliases:
-
-| Old flag | Equivalent |
-|----------|-----------|
-| `--debug` | `--trace=bytecode` |
-| `--debug-jit` | `--trace=jit` |
-| `--debug-resume` | `--trace=fiber` |
-| `--debug-stack` | `--trace=call` |
-| `--debug-wasm` | `--trace=wasm` |
+`--trace=` and its `--debug-*` aliases log what a subsystem does
+([debugging](analysis/debugging.md)).
 
 ### Statistics
 
@@ -325,15 +267,6 @@ with an `:argument-error`.
   (assert (not ok?) "a keyword other than :off or :eager is no policy")
   (assert (= (get err :error) :type-error)))
 ```
-
-### Future feature flags
-
-A trace set accepts the following keywords without error, for forward
-compatibility:
-
-- `:spirv` — SPIR-V shader compilation
-- `:mlir` — MLIR compilation tier
-- `:gpu` — GPU offloading
 
 ## Implementation
 

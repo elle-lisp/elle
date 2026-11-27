@@ -1,8 +1,8 @@
 # Debugging and introspection
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-27 -->
 
-The primitives a program uses to print its values, inspect a closure, time its own work, and read what it cost.
+How to print a program's values, inspect a closure, time work, read what the process cost, and trace a subsystem.
 
 ## Printing a value on its way through
 
@@ -155,3 +155,63 @@ thread, and `sys/rusage` reads the whole program.
     (assert (>= (get after :max-rss-kb) (get before :max-rss-kb))
             "and the peak never falls")))
 ```
+
+## Tracing a subsystem
+
+`--trace=` takes a comma-separated list of trace keywords, and `all` names
+every one. Each trace line goes to stderr as `[trace:KEYWORD] message`.
+
+```bash
+elle --trace=call script.lisp        # trace function calls
+elle --trace=call,signal script.lisp # trace calls and signals
+elle --trace=all script.lisp         # trace everything
+```
+
+| Keyword | What it logs |
+|---------|-------------|
+| `call` | Function calls: name, arg count, dispatch decision |
+| `signal` | Signal dispatch: bits received, squelch, capability denial |
+| `compile` | Compilation: phase entry and exit, with timing |
+| `fiber` | Fiber operations: resume, swap, status transitions |
+| `hir` | HIR analysis: binding resolution, signal inference |
+| `lir` | LIR lowering: slot allocation, capture cells |
+| `emit` | Bytecode emission |
+| `jit` | JIT compilation: decisions, rejections, batch compilation |
+| `io` | I/O operations |
+| `import` | Plugin loads: the path each `import/load-plugin` call loads |
+| `macro` | Macro expansion |
+| `wasm` | WASM backend: host calls, compilation |
+| `capture` | Capture analysis decisions |
+| `arena` | Heap allocation, region enter and exit |
+| `escape` | Escape analysis decisions |
+| `bytecode` | Bytecode dump before execution |
+| `posix` | The POSIX-signal subsystem: the `os/sig-*` primitives, signalfd and kqueue |
+| `chan` | Channel wake protocol: register, deregister, the wake a send makes |
+| `rc` | Reference-count operations on regions |
+| `regions` | Region inference and lifetime decisions |
+| `anf` | The A-normal form lift pass |
+| `pages` | Region page allocation |
+| `boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile and run, the boot image's hydrate and store, and whether the embedded blob was mapped or copied |
+| `census` | Post-boot heap census: per-tag object counts and bytes, capture cells, pointer-slot density, unsealed variants ([sealing](../impl/image/sealing.md)) |
+| `free` | Region free diagnostics |
+| `guardfree` | Guarded-free diagnostics |
+| `freebt` | Free backtrace diagnostics |
+| `scrub` | Zero a freed page's body, so a stale read lands on a tag no live value carries |
+| `residue` | Teardown leak dump: the surviving regions and their cross-region edges |
+| `park` | Park and resume diagnostics: every suspended-frame park and every frame replay, with the frame's shape |
+| `syncjit` | Compile with Cranelift on the VM thread instead of the background worker |
+| `spirv`, `mlir`, `gpu` | Nothing yet: the keywords of future GPU backends |
+
+The command line refuses an unknown keyword, and the error lists every keyword
+it accepts. `(vm/config-set :trace SET)` accepts any keyword
+([config](../config.md)).
+
+`elle` keeps five older flags as aliases:
+
+| Flag | Equivalent |
+|------|-----------|
+| `--debug` | `--trace=bytecode` |
+| `--debug-jit` | `--trace=jit` |
+| `--debug-resume` | `--trace=fiber` |
+| `--debug-stack` | `--trace=call` |
+| `--debug-wasm` | `--trace=wasm` |
