@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-27
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -179,7 +179,8 @@ impl Default for RuntimeConfig {
 
 /// All runtime configuration for Elle: what the build decides, and what the
 /// command line sets (docs/config.md). The tier policies start where the build
-/// puts them; only the rig and an embedding host set them otherwise.
+/// puts them. `--jit=` sets the JIT's in a JIT build, and the rig and an
+/// embedding host may set any of them.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// JIT compilation policy.

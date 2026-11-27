@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-27
 //! `Config::parse`: read elle's own flags off the front of an argv, and hand back
 //! the program and its arguments. Every flag `elle --help` lists is recognized here.
 //!
@@ -70,6 +70,11 @@ impl Config {
                 .map_err(|_| format!("--page-pool-max: expected integer, got '{}'", rest))?;
         } else if let Some(rest) = arg.strip_prefix("--jit-verify=") {
             self.jit_verifier = JitVerifier::from_flag(rest)?;
+        } else if let Some(rest) = arg
+            .strip_prefix("--jit=")
+            .filter(|_| JitPolicy::is_build_tier())
+        {
+            self.jit = JitPolicy::from_flag(rest)?;
         } else if let Some(rest) = arg.strip_prefix("--home=") {
             self.home = Some(rest.to_string());
         } else if let Some(rest) = arg.strip_prefix("--path=") {
