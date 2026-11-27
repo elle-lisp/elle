@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-26
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -22,15 +22,10 @@ impl VM {
         args: &[Value],
     ) -> (SignalBits, Value) {
         // Closure must have LIR — primitives, macros, etc. don't.
-        let mut lir = match closure.template.lir() {
+        let lir = match closure.template.lir() {
             Some(l) => l.to_owned(),
             None => return (SIG_ERROR, rejected(self, "jit", "closure has no LIR")),
         };
-        // Backfill a nameless LIR from the template so the compile records a
-        // readable code-address registry entry (docs/impl/jit.md).
-        if lir.view().name().is_none() {
-            lir.set_name(Some(closure.template.display_label()));
-        }
 
         // Arity check writes to fiber.signal on mismatch.
         if !self.check_arity(&closure.template.arity(), args.len()) {
@@ -51,8 +46,12 @@ impl VM {
                         )
                     }
                 };
+                // The label names the entry the compile records
+                // (docs/impl/jit-map.md).
                 let (compiled, cost) = crate::jit::CompileCost::measure(|| {
-                    compiler.compile(&lir.view(), crate::jit::ChildTable::of(&closure.template))
+                    compiler
+                        .labeled(crate::jit::registry::label(&closure.template))
+                        .compile(&lir.view(), crate::jit::ChildTable::of(&closure.template))
                 });
                 self.jit_stats.take(cost, &compiled);
                 match compiled {

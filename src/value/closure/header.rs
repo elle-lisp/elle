@@ -272,9 +272,8 @@ impl ClosureTemplate {
     /// A human-readable label: the declared name when there is one, else the
     /// smallest-offset source location, else `<anon>`. Lowering names only a
     /// lambda that `def` or `letrec` binds, so for any other function the
-    /// location is the label that identifies it to a reader. The JIT
-    /// code-address registry records it (docs/impl/jit.md). The location table
-    /// is ascending, so the smallest offset is its first entry.
+    /// location is the label that identifies it to a reader. The location
+    /// table is ascending, so the smallest offset is its first entry.
     pub fn display_label(&self) -> String {
         if let Some(name) = self.name() {
             return name.to_string();

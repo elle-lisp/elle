@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-26
 //! The process-global JIT code-address registry.
 //!
 //! docs/impl/jit-map.md
@@ -9,7 +9,20 @@
 
 use std::sync::Mutex;
 
+use crate::value::ClosureTemplate;
+
 static ENTRIES: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new());
+
+/// The label a compile of `template` records here and in perf's map: the
+/// name, `@`, and the origin, or the origin alone, or `display_label` without
+/// an origin.
+pub(crate) fn label(template: &ClosureTemplate) -> String {
+    match (template.name(), template.origin()) {
+        (Some(name), Some(origin)) => format!("{name}@{origin}"),
+        (None, Some(origin)) => origin.to_string(),
+        (_, None) => template.display_label(),
+    }
+}
 
 /// Record one compiled function's entry address. Called once per successful
 /// compile. A duplicate address (a page reused after a module was dropped)

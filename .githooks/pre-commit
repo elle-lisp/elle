@@ -3,7 +3,7 @@
 #   1. Gate on the audit stamp: every staged file carries today's date.
 #   2. Rebuild the generated AGENTS.md indexes and stage what changed.
 #   3. Format the staged content of each .lisp file with `elle fmt`, from the
-#      `elle` on PATH, and stage it. `elle fmt` also migrates a file that
+#      system-wide `elle` on PATH, and stage it. `elle fmt` also migrates a file that
 #      declares an older epoch.
 #   4. Format the staged content of each .rs file with `rustfmt` and stage it.
 #   5. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
@@ -62,7 +62,8 @@ held() {
 }
 
 # ── The elle the hook runs ──────────────────────────────────────────
-# The index generator and the Lisp formatter both run the `elle` on PATH.
+# The index generator and the Lisp formatter both run the system-wide `elle`,
+# the one on PATH, and never a build of the tree being committed.
 
 # ── Generated indexes ───────────────────────────────────────────────
 # Rebuild every AGENTS.md the generator owns and re-stage what changed. Fixed,

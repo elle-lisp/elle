@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-26
 // `make perf` records a profile perf can unwind through the JIT's frames.
 //
 // docs/impl/jit-map.md
@@ -55,12 +55,39 @@ fn each_program_records_to_a_file_of_its_own_name() {
     assert!(record.contains("-o target/perf-probe.data"), "{record}");
 }
 
-/// The Makefile exports `ELLE_JIT_VERIFY=on`, so without the flag the
-/// profile would charge the verifier's work to the program.
+/// A build with debug assertions verifies by default. The flag holds the
+/// verifier off whatever the build, so the profile never charges its work to
+/// the program.
 #[test]
 fn the_record_runs_without_the_verifier() {
     let record = line_with(&recipe("perf"), "perf record");
     assert!(record.contains("--jit-verify=off"), "{record}");
+}
+
+/// The counter-factual: the perf build carries no blob, so a record with no
+/// warm-cache image to read charges the program a source boot. On fib that is
+/// four fifths of the profile. `--cache=` on either start leaves the record
+/// without that image.
+#[test]
+fn the_record_starts_from_the_image_a_warm_up_stored() {
+    let recipe = recipe("perf");
+    let lines: Vec<&str> = recipe.lines().collect();
+    let at = |needle: &str| {
+        lines
+            .iter()
+            .position(|l| l.trim_start().starts_with(needle))
+            .unwrap_or_else(|| panic!("a line starts with `{needle}`:\n{recipe}"))
+    };
+    let build = at("cargo build");
+    let warm = at("./target/perf/elle");
+    let record = at("perf record");
+    assert!(
+        build < warm && warm < record,
+        "the perf build starts once between the build and the record:\n{recipe}"
+    );
+    for start in [lines[warm], lines[record]] {
+        assert!(!start.contains("--cache="), "{start}");
+    }
 }
 
 #[test]
