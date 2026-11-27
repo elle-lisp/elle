@@ -284,17 +284,6 @@ impl ClosureTemplate {
             .unwrap_or_else(|| "<anon>".to_string())
     }
 
-    /// The label a JIT compile records in the code-address registry and in
-    /// perf's map: the name, `@`, and the origin, or the origin alone, or
-    /// `display_label` without an origin (docs/impl/jit-map.md).
-    pub fn jit_label(&self) -> String {
-        match (self.name(), self.origin()) {
-            (Some(name), Some(origin)) => format!("{name}@{origin}"),
-            (None, Some(origin)) => origin.to_string(),
-            (_, None) => self.display_label(),
-        }
-    }
-
     /// The executable context for this code object. `Code` is this header and
     /// nothing else, so building one copies one slice.
     #[inline]

@@ -50,7 +50,7 @@ impl VM {
                 // (docs/impl/jit-map.md).
                 let (compiled, cost) = crate::jit::CompileCost::measure(|| {
                     compiler
-                        .labeled(closure.template.jit_label())
+                        .labeled(crate::jit::registry::label(&closure.template))
                         .compile(&lir.view(), crate::jit::ChildTable::of(&closure.template))
                 });
                 self.jit_stats.take(cost, &compiled);

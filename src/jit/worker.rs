@@ -169,7 +169,7 @@ pub(crate) fn prepare_task(
         lir,
         children: children.to_owned(),
         bytecode_key,
-        label: template.map(ClosureTemplate::jit_label),
+        label: template.map(crate::jit::registry::label),
     }
 }
 
