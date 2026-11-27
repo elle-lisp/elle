@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-27 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -39,9 +39,8 @@ suite under [tests](../tests/AGENTS.md).
 An implementation test enters at the layer it tests. A Rust test builds its
 call as LIR or bytecode, beneath every optimization. An Elle file runs on
 [the rig](../rig/overview.md), which hosts the same compiler as `elle` and can
-configure it in ways `elle` cannot: the JIT off or eager, the graft off, a
-diagnostic mode on. The file names that configuration in a sidecar beside it.
-Nothing in the language keeps a shape alive through the optimizer, and no
+configure it in ways `elle` cannot: the graft off, a diagnostic mode on. The
+file names that configuration in a sidecar beside it. Nothing in the language keeps a shape alive through the optimizer, and no
 language test needs it to.
 
 ## A build is an implementation
@@ -64,7 +63,7 @@ disagreement is a defect in the build that disagrees
 |---|---|---|---|
 | Language | in the specification | yes | `fiber/new`, `%add`, `(silent!)` |
 | Implementation extension | by the implementation | no | `jit?`, `fn/bytecode-size`, `compile/run-on`, `arena/count` |
-| Implementation test surface | no | no | a rig sidecar that turns the JIT off |
+| Implementation test surface | no | no | a rig sidecar that turns the graft off |
 
 An implementation extension is part of the user build, and its documentation
 says that it belongs to this implementation. A language test does not call
@@ -247,6 +246,6 @@ them.
   limit of an optimization, not on a rule of the language. The day the
   optimization lifts that limit, the test is vacuous again.
 - **A command-line flag or a harness profile for language tests.** Each is a
-  second runtime. A user build therefore has no flag that chooses a tier.
+  second runtime, so the language suite runs every build with no flag.
 - **Language tests against this implementation's HIR.** They make this
   implementation's HIR the specification.

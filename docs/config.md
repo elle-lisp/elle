@@ -7,9 +7,9 @@ program reads and changes through `vm/config`.
 
 A build fixes the runtime a program runs on: which optimizing tier it carries,
 and which I/O backend. The command line sets what a user may reasonably
-change per run — tracing, dumps, paths and caches — and no flag chooses a
-tier. A running program reads the rest through `vm/config` and
-changes a few settings through `vm/config-set`.
+change per run: tracing, dumps, paths, caches, and when the JIT compiles. A
+running program reads the rest through `vm/config` and changes a few settings
+through `vm/config-set`.
 
 ## Builds
 
@@ -17,7 +17,7 @@ A build carries at most one optimizing tier, and the cargo features pick it:
 
 | Feature | Default | What it adds |
 |---------|---------|--------------|
-| `jit` | on | The Cranelift JIT, the tier of the default build |
+| `jit` | on | The Cranelift JIT, the tier of the default build. Where it is the tier, it adds `--jit=` |
 | `mlir` | off | The MLIR tier. It replaces the JIT: an `mlir` build runs no JIT |
 | `wasm` | off | The WebAssembly backend. It replaces both, and adds `--wasm=` |
 | `ffi` | on | C interop through libffi |
@@ -26,14 +26,14 @@ A build carries at most one optimizing tier, and the cargo features pick it:
 
 The precedence is `wasm`, then `mlir`, then `jit`: a build with more than one
 of the three runs the first it carries. A tier compiles a function once the
-function has been called ten times; `vm/config` reads and sets that threshold
-(below).
+function has been called ten times. `vm/config` reads and sets that threshold
+(below), and `--jit=` sets the JIT's for one run.
 
 A build is one implementation of Elle, and every build must pass the language
-suite ([spec](spec.md)). There is therefore no flag that chooses a tier or a
-backend. A user who wants the interpreter alone builds without the `jit`
-feature. Two programs can switch a tier off or make it eager: the rig, for one
-implementation test ([rig](../rig/overview.md)), and `elle test`
+suite with no flag ([spec](spec.md)). No flag chooses a tier or a backend.
+`--jit=` changes only when the JIT of a JIT build compiles, or turns it off.
+At run time, two programs can switch a tier off or make it eager: the rig, for
+one implementation test ([rig](../rig/overview.md)), and `elle test`
 ([test-runner](test-runner.md)). A user program cannot.
 
 No primitive of a user build names the build; the rig's `(elle/build)` does
@@ -111,6 +111,26 @@ source locations, region tables, and yield, call and charge sites. Two runs
 over one file print one text, so a recorded dump is a golden.
 `make bytecode-golden` records it for the corpus and the standard library, and
 `make bytecode-golden-check` compares the current binary against the record.
+
+### JIT policy
+
+A build whose tier is the JIT takes `--jit=`; no other build accepts the flag.
+
+```bash
+elle --jit=off script.lisp          # the interpreter runs every function
+elle --jit=0 script.lisp            # compile each function at its first call
+elle --jit=10 script.lisp           # compile each function after ten calls (default)
+```
+
+| Policy | CLI | `(vm/config :jit)` | Behavior |
+|--------|-----|--------------------|----------|
+| Off | `--jit=off` | `nil` | The interpreter runs every function |
+| Eager | `--jit=0` | `0` | Each function compiled at its first call |
+| Adaptive | `--jit=N` | `N` | Each function compiled once it has been called N times; the default N is 10 |
+
+`--jit=` refuses any other value, and the error names it. An eager run compiles
+every function it calls, the scheduler's included, so a short program spends
+most of its time in Cranelift ([jit](impl/jit.md)).
 
 ### WASM policy
 
@@ -211,14 +231,14 @@ compiles its boot sources.
 (assert (contains? |"so" "dylib" "dll"| (vm/config :plugin-suffix)))
 ```
 
-`:jit` answers the number of calls after which the JIT compiles a function,
-or nil when this build carries no JIT or the JIT is off. `:mlir` answers the
-same for the MLIR tier. A `wasm` build answers `:wasm` with its policy
-keyword, and no other build knows the key.
+`:jit` answers the number of calls after which the JIT compiles a function: 0
+when it is eager, and nil when this build carries no JIT or the JIT is off.
+`:mlir` answers the same for the MLIR tier. A `wasm` build answers `:wasm` with
+its policy keyword, and no other build knows the key.
 
 ```lisp
 (let [jit (vm/config :jit)]
-  (assert (or (nil? jit) (> jit 0)) "a JIT threshold is a positive count"))
+  (assert (or (nil? jit) (>= jit 0)) "a JIT threshold is a count of calls"))
 ```
 
 ### The depth cap
@@ -279,8 +299,6 @@ For hot paths (VM dispatch loop), trace keywords are mirrored in a shared
 atomic bitfield, the instance's `TraceCell`, to avoid set lookups on every
 instruction.
 
-An embedding host builds a `Config` itself, so the policies a user build does
-not expose are reachable from Rust: `JitPolicy::Off` and `JitPolicy::Eager`
-are what the rig sets for a sidecar that asks for them. `GraftPolicy::Off` is
-another, and keeps every call a call in the units an instance compiles after
-its boot ([grafting a call](impl/graft.md)).
+An embedding host builds a `Config` itself, so a policy no flag sets is
+reachable from Rust. `GraftPolicy::Off` is one, and keeps every call a call in
+the units an instance compiles after its boot ([grafting a call](impl/graft.md)).

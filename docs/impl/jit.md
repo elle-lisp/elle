@@ -86,8 +86,9 @@ because the operands are integers.
 ## Function selection
 
 Functions become JIT candidates based on a hotness threshold, ten calls by
-default, which `(vm/config-set :jit N)` changes. The VM increments a counter on
-each call; when it crosses the threshold, the function is compiled.
+default, which `--jit=N` and `(vm/config-set :jit N)` change. The VM
+increments a counter on each call; when it crosses the threshold, the function
+is compiled.
 
 **A call is counted by whichever tier makes it, in tail position or out of
 it.** The interpreter counts a non-tail call in `try_jit_call` and a tail call
@@ -314,12 +315,13 @@ delivery ledger as the interpreter's parker does: `Emit` for an emit,
 
 ## Configuration
 
-[config.md](../config.md) owns the builds, the JIT threshold, and the policy the
-binary starts from. The JIT is the optimizing tier of the default build; a
-build with the `mlir` or `wasm` feature carries that tier instead and runs no
-JIT. No flag turns the JIT off or makes it eager. The rig does both through a
-sidecar or a profile ([rig](../../rig/overview.md)), and `elle test` runs each
-whole file with the JIT off and eager ([test-runner.md](../test-runner.md)).
+[config.md](../config.md) owns the builds, the JIT threshold, `--jit=`, and the
+policy the binary starts from. The JIT is the optimizing tier of the default
+build; a build with the `mlir` or `wasm` feature carries that tier instead and
+runs no JIT. `--jit=off` turns the JIT off and `--jit=0` makes it eager. The rig
+does both through a sidecar or a profile ([rig](../../rig/overview.md)), and
+`elle test` runs each whole file with the JIT off and eager
+([test-runner.md](../test-runner.md)).
 
 ## Files
 
