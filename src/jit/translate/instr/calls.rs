@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-27
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
 //! the direct self-call, the call helper, and `MakeClosure`.
 //!
@@ -32,7 +32,7 @@ impl<'a> FunctionTranslator<'a> {
                 moves,
                 ..
             } => {
-                self.emit_charge(builder)?;
+                self.emit_charge(builder, Resumes::AtNode)?;
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self
                     .vm_ptr
@@ -87,7 +87,7 @@ impl<'a> FunctionTranslator<'a> {
                 // the self-call branch, so each is counted once whichever path
                 // runs, and the native loop a self call becomes charges once
                 // per trip.
-                self.emit_charge(builder)?;
+                self.emit_charge(builder, Resumes::AtNode)?;
                 let park_site = if self.lir.signal().may_suspend() {
                     let idx = self.call_site_index;
                     self.call_site_index += 1;

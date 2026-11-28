@@ -77,9 +77,9 @@ pub(crate) struct ChargeSiteMeta {
 }
 
 impl YieldPointMeta {
-    /// The metadata for `site` in a function of `num_params` parameters.
-    pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
-        Self::new(site.resume_ip, SpillLayout::of(site, num_params))
+    /// The metadata for `site`, whose yield spills `spill`.
+    pub(crate) fn of(site: SiteRef<'_>, spill: SpillLayout) -> Self {
+        Self::new(site.resume_ip, spill)
     }
 
     /// A yield point that resumes at `resume_ip` and spills `spill`.
@@ -89,11 +89,11 @@ impl YieldPointMeta {
 }
 
 impl CallSiteMeta {
-    /// The metadata for `site` in a function of `num_params` parameters.
-    pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
+    /// The metadata for `site`, whose park spills `spill`.
+    pub(crate) fn of(site: SiteRef<'_>, spill: SpillLayout) -> Self {
         CallSiteMeta {
             push_resume_value: site.push_resume_value,
-            ..Self::new(site.resume_ip, SpillLayout::of(site, num_params))
+            ..Self::new(site.resume_ip, spill)
         }
     }
 
@@ -109,10 +109,10 @@ impl CallSiteMeta {
 }
 
 impl ChargeSiteMeta {
-    /// The metadata for `site` in a function of `num_params` parameters. A
-    /// charge site's resume address is the charging instruction itself.
-    pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
-        Self::new(site.resume_ip, SpillLayout::of(site, num_params))
+    /// The metadata for `site`, whose pause spills `spill`. A charge site's
+    /// resume address is the charging instruction itself.
+    pub(crate) fn of(site: SiteRef<'_>, spill: SpillLayout) -> Self {
+        Self::new(site.resume_ip, spill)
     }
 
     /// A charge site whose charging instruction sits at `ip`, and whose pause

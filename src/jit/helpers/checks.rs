@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-27
 // docs/impl/jit.md
 // docs/impl/region/unwind.md
 //! The check a compiled frame runs where a signal can leave it, and the park it makes there.
@@ -15,7 +15,7 @@ use cranelift_module::Module;
 
 use crate::value::repr::{TAG_NIL, TAG_TRUE};
 
-use super::super::translate::FunctionTranslator;
+use super::super::translate::{FunctionTranslator, Resumes, Site};
 use super::super::JitError;
 
 impl FunctionTranslator<'_> {
@@ -114,7 +114,13 @@ impl FunctionTranslator<'_> {
             }
         };
 
-        let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
+        // The interpreter resumes past the call or the instruction that raised.
+        let spilled_ptr = self.spill_locals_and_operands(
+            builder,
+            Site::Call(call_site_idx),
+            Resumes::PastNode,
+            stack_regs,
+        )?;
         let call_site_idx_val = builder.ins().iconst(I64, call_site_idx as i64);
 
         // Call elle_jit_yield_through_call(spilled, call_site_index, vm, closure_tag, closure_payload)

@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-27
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -114,7 +114,7 @@ impl<'a> FunctionTranslator<'a> {
                     JitError::InvalidLir(format!("Unknown jump target: {:?}", label))
                 })?;
                 if self.is_back_edge(*label) {
-                    self.emit_charge(builder)?;
+                    self.emit_charge(builder, Resumes::Into(*label))?;
                 }
                 builder.ins().jump(*target, &[]);
             }
@@ -150,7 +150,7 @@ impl<'a> FunctionTranslator<'a> {
                         .brif(is_falsy, *else_block, &[], charge_block, &[]);
                     builder.switch_to_block(charge_block);
                     builder.seal_block(charge_block);
-                    self.emit_charge(builder)?;
+                    self.emit_charge(builder, Resumes::Into(*then_label))?;
                     builder.ins().jump(*then_block, &[]);
                 } else {
                     builder
@@ -195,7 +195,12 @@ impl<'a> FunctionTranslator<'a> {
                     }
                 };
 
-                let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
+                let spilled_ptr = self.spill_locals_and_operands(
+                    builder,
+                    Site::Yield(yield_index),
+                    Resumes::Into(*resume_label),
+                    stack_regs,
+                )?;
                 let yield_idx_val = builder.ins().iconst(I64, yield_index as i64);
 
                 let sig_val = builder.ins().iconst(I64, signal.raw() as i64);
