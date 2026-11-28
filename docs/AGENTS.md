@@ -32,7 +32,7 @@ Up: [..](../AGENTS.md)
 - [io.md](io.md) — **I/O** All I/O in Elle is async: each call yields to the scheduler, and other fibers run until it completes.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
-- [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `datum->syntax` breaks hygiene on purpose.
+- [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `syntax/<-datum` breaks hygiene on purpose.
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
@@ -80,6 +80,7 @@ Up: [..](../AGENTS.md)
 - [epochs/](epochs/AGENTS.md) — Bodies across epochs 17 and 18
 - [impl/](impl/AGENTS.md) — The ANF lift, The region roadmap, The audit queue, Bytecode, Conformance of the region system, Cranelift, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, Grafting a call, HIR — High-level IR, Hoisting constants, Images — regions hydrated at load, How compiled code builds a closure, JIT fuel, The JIT code map, A direct self-call, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, The region memory model, MLIR Backend, Mutable stores in region pages, Reader, Self-recursion: the executing-closure mechanism (no cell), Sending a region, The signal solver, Spares, SPIR-V Backend, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, The JIT verifier, VM, WASM Backend
 - [io/](io/AGENTS.md) — Files, I/O deadlines, Writing to a port
+- [macros/](macros/AGENTS.md) — Where macros are going: a macro is a lexical binding and a sealed value, the analyzer expands it, and the fold answers questions of type.
 - [modules/](modules/AGENTS.md) — Modules: the compiled forms a load keeps, Modules: how a file compiles, Modules: macros as values, Modules: the plan, Modules: terms and principles, Where an import finds its file, Modules: one form
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Authority, Capability bits, Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Mediation, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery, Squelch and attune

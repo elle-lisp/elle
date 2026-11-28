@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-26
 //! What a boot image carries that only this crate can see, and compile parity under either boot.
 //!
 //! docs/impl/image/boot.md
@@ -69,7 +69,8 @@ fn the_macro_table_crosses_with_its_filled_transformers() {
 
 // docs/impl/image/boot.md: the installed expander mints the scopes a source
 // boot would, and gensym answers the names it would, because both name the
-// unit that mints them. The boot raises no counter for it.
+// unit that mints them; the boot raises no counter. A program reads the names
+// alone, and each scope carries the same tag and count.
 //
 // The counter-factual is a count the instance carries from its boot: the
 // source boot and the image boot reach a user's file having done different
@@ -94,8 +95,8 @@ fn an_image_boot_expands_a_unit_as_a_source_boot_does() {
     );
 }
 
-/// Whether a call to the stdlib's `inc`, made by a REPL form with the JIT
-/// eager, leaves compiled code for it in the cache.
+/// Whether a call to the stdlib's `inc`, with the JIT eager, leaves compiled
+/// code for it in the cache.
 #[cfg(feature = "jit")]
 fn inc_promotes(rt: &mut Runtime) -> bool {
     rt.vm().runtime_config.jit = crate::config::JitPolicy::Eager;

@@ -243,6 +243,9 @@ pub enum InstrRef<'a> {
     IsSet { dst: Reg, src: Reg },
     /// Check if value is a mutable set (for pattern matching)
     IsSetMut { dst: Reg, src: Reg },
+    /// What `match` reads a value as: a syntax object's view, built in the
+    /// node's region, and any other value unchanged (docs/macros/syntax.md).
+    SyntaxView { dst: Reg, src: Reg },
     /// Get array length (for pattern matching)
     ArrayMutLen { dst: Reg, src: Reg },
 
@@ -281,6 +284,10 @@ pub enum InstrRef<'a> {
     /// Table/struct get with silent nil: nil if key missing/wrong type. Used by
     /// match. `key` is a keyword or symbol immediate.
     StructGetOrNil { dst: Reg, src: Reg, key: ConstRef },
+    /// Whether a struct or @struct holds `key`, a key that holds nil included;
+    /// false for any other value. Used by match, and never signals. `key` is a
+    /// keyword or symbol immediate.
+    StructHasKey { dst: Reg, src: Reg, key: ConstRef },
     /// Table/struct get for destructuring: signals error if key missing or
     /// wrong type. `key` is a keyword or symbol immediate.
     StructGetDestructure { dst: Reg, src: Reg, key: ConstRef },

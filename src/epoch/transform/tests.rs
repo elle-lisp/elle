@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! Tests for the tree migration: each rule kind, and each epoch's rules, applied to syntax nodes.
 //!
 //! docs/epochs.md
@@ -307,3 +307,4 @@ mod forward;
 mod imports;
 mod millis;
 mod signals;
+mod syntax;

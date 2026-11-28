@@ -1,8 +1,8 @@
-// audited: 2026-09-14
-// docs/impl/vm.md
-// docs/impl/bytecode.md
-//! The stack-only opcode bodies: arithmetic, bitwise, comparisons, type
-//! conversions, type checks, and the container intrinsics.
+// audited: 2026-11-24
+//! The stack-only opcode bodies: arithmetic, bitwise, comparisons, type conversions, type checks, and the container intrinsics.
+//!
+//! docs/impl/vm.md
+//! docs/impl/bytecode.md
 //!
 //! Split out of the dispatch match (opcodes.rs) on the one line every opcode
 //! here sits above: its whole effect is on the operand stack. None of them
@@ -72,6 +72,7 @@ impl VM {
             Instruction::IsStructMut => types::handle_is_struct_mut(self),
             Instruction::IsSet => types::handle_is_set(self),
             Instruction::IsSetMut => types::handle_is_set_mut(self),
+            Instruction::SyntaxView => types::handle_syntax_view(self),
             Instruction::IsBool => types::handle_is_bool(self),
             Instruction::IsInt => types::handle_is_int(self),
             Instruction::IsFloat => types::handle_is_float(self),

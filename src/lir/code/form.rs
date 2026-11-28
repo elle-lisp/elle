@@ -117,7 +117,7 @@ pub fn instr<'a>(instr: &InstrRef<'a>) -> Form<'a> {
         UnaryOp => { dst, op, src, proof }
         Convert => { dst, op, src }
         IsNil | IsPair | IsArray | IsArrayMut | IsStruct | IsStructMut | IsSet | IsSetMut
-        | ArrayMutLen | MatchFail | FirstDestructure | RestDestructure | FirstOrNil
+        | SyntaxView | ArrayMutLen | MatchFail | FirstDestructure | RestDestructure | FirstOrNil
         | RestOrNil | IsEmpty | IsBool | IsInt | IsFloat | IsString | IsKeyword
         | IsSymbolCheck | IsBytes | IsBox | IsClosure | IsFiber | TypeOf | Length
         | Pop => { dst, src }
@@ -127,7 +127,7 @@ pub fn instr<'a>(instr: &InstrRef<'a>) -> Form<'a> {
         ArrayMutRefDestructure | ArraySliceFrom | ArrayMutSliceFrom | ArrayMutRefOrNil => {
             dst, src, index
         }
-        StructGetOrNil | StructGetDestructure => { dst, src, key }
+        StructGetOrNil | StructHasKey | StructGetDestructure => { dst, src, key }
         StructRest => { dst, src, exclude_keys = "exclude-keys" }
         Eval => { dst, expr, env }
         ArrayMutExtend => { dst, array, source }

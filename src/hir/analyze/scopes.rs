@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! Lexical scopes and name resolution over them.
 //!
 //! docs/bindings.md
@@ -126,9 +126,9 @@ impl<'a> Analyzer<'a> {
                 // template-origin reference (intro scope present) skips use-site
                 // local shadows (intro absent from binder and frame), and
                 // resolves at top level. A template binder (same intro scope)
-                // and a datum->syntax binder inside a template-origin form
+                // and a syntax/<-datum binder inside a template-origin form
                 // (frame provenance carries the intro) still bind their own
-                // expansion's references. Argument-origin and datum->syntax
+                // expansion's references. Argument-origin and syntax/<-datum
                 // references (no intro scope) still see call-site bindings.
                 let best = candidates
                     .iter()

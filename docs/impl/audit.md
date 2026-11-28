@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -127,29 +127,29 @@ A generated file is exempt because nobody audits its content — its generator i
 the thing that gets audited. An `AGENTS.md` is exempt when it carries the
 marker [the generator](../../tools/agents/overview.md) writes, and queued when it does not.
 
-[The Makefile](../../Makefile), [the standard library](../../src/stdlib.lisp)
-and [the LIR instruction enum](../../src/lir/code/instr.rs) are exempt, and
-they are the only repository files exempted by name. Everything else in the
-queue is read whole by somebody: a document off an index, a source file off a
-call site. Nobody reads these three that way:
+[The Makefile](../../Makefile) has no queued extension. [The standard
+library](../../src/stdlib.lisp), [the prelude](../../src/prelude.lisp) and
+[the LIR instruction enum](../../src/lir/code/instr.rs) are the only repository
+files exempted by name. Everything else in the queue is read whole by somebody:
+a document off an index, a source file off a call site. Nobody reads these four
+that way:
 
 - `make help` is how a reader finds an action, and the `##` line beside a
   target is what they read.
-- `(doc name)` is how a reader finds a standard-library function, and the
-  docstring is what they read.
+- `(doc name)` is how a reader finds a standard-library function or a prelude
+  macro, and the docstring is what they read.
 - A match arm or a grep is how a reader finds an LIR instruction, and that
   variant's doc comment is what they read.
 
 A reading budget over hundreds of lines of recipe, thousands of lines of
 definitions, or nearly ninety variants of one enum measures a distance no reader
-travels. So none of the three is on the size ledger either: the size producer
+travels. So none of the four is on the size ledger either: the size producer
 reads the queue's own lists ([the tool producers](../../tests/ratchet/overview.md)).
 The enum cannot be split without nesting variants into a sub-enum, which
 rewrites every match over it ([the LIR module](../../src/lir/overview.md)).
 
-The exemption names the standard library's path, never its extension. Every
-other `.lisp` file stays queued: [the core](../../src/core.lisp), [the
-prelude](../../src/prelude.lisp), and every module under `lib/`.
+The exemption names each path, never an extension. Every other `.lisp` file
+stays queued: [the core](../../src/core.lisp) and every module under `lib/`.
 
 Exempting the name rather than the marker would drop every hand-written index
 out of the queue, the root guide included. The root guide is the most-read

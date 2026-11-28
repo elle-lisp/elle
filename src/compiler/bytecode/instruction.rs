@@ -392,6 +392,14 @@ pub enum Instruction {
     /// Signals an error on any other value. Operand: u16 index.
     ArraySliceFrom,
 
+    /// Replace a syntax object on top of the stack with its view, built in the
+    /// node's region; leave any other value (docs/macros/syntax.md).
+    SyntaxView,
+
+    /// Whether a struct or @struct holds a key, nil or not; false for any other
+    /// value. Never signals. Operand: u16 constant index of the key.
+    StructHasKey,
+
     /// Materialize a heap literal — a string, or quoted compound data (list /
     /// array / nested structure) — into a fresh per-activation region. Operands:
     /// u32 region slot, u32 template byte length, then that many bytes encoding a

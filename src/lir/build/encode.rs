@@ -311,7 +311,9 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             u.push(src);
             (Some(dst), index as u32, 0)
         }
-        R::StructGetOrNil { dst, src, key } | R::StructGetDestructure { dst, src, key } => {
+        R::StructGetOrNil { dst, src, key }
+        | R::StructHasKey { dst, src, key }
+        | R::StructGetDestructure { dst, src, key } => {
             u.push(src);
             (Some(dst), t.push_const(ConstRec::immediate(key)), 0)
         }
@@ -416,6 +418,7 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
         | R::IsStructMut { dst, src }
         | R::IsSet { dst, src }
         | R::IsSetMut { dst, src }
+        | R::SyntaxView { dst, src }
         | R::ArrayMutLen { dst, src }
         | R::MatchFail { dst, src }
         | R::FirstDestructure { dst, src }

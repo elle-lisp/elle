@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The structural walk that computes each node's raw last use, and records the bookkeeping the fixpoint solver reads.
 //!
 //! docs/impl/region/anchors.md
@@ -46,6 +46,16 @@ pub(super) struct LastUseBuilder<'a> {
     /// bound, so its init narrows no further than the point the walk gave
     /// the `def`.
     pub(super) propagated_inits: rustc_hash::FxHashSet<HirId>,
+    /// `Var` nodes read inside a loop of a binding bound outside it, whose
+    /// last use the walk put at that loop, each with the binding it reads.
+    /// Such a read can also be a binder's init, as the `b` of
+    /// `(while c (let [s b] …))` is. The next pass reads `b` again, so the
+    /// solve keeps the walk's answer as the init's floor, unless `assigned`
+    /// holds `b` (docs/impl/region/lastuse.md).
+    pub(super) loop_reads: HashMap<HirId, Binding>,
+    /// The bindings an `Assign` writes. A name bound to a read of one takes
+    /// a counted reference of its own on every pass.
+    pub(super) assigned: rustc_hash::FxHashSet<Binding>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked, outermost first. A `Var` read inside one, of a binding bound
     /// outside it, has its `last_use` extended so the binding survives
@@ -122,6 +132,7 @@ impl LastUseBuilder<'_> {
                     if self.ord(iter) > self.ord(my_last) {
                         my_last = iter;
                     }
+                    self.loop_reads.insert(hir.id, *b);
                     break;
                 }
             }
@@ -153,7 +164,10 @@ impl LastUseBuilder<'_> {
                 self.propagated_inits.insert(value.id);
                 self.walk(value, true, my_last);
             }
-            HirKind::Assign { value, .. } => self.walk(value, true, hir.id),
+            HirKind::Assign { value, target } => {
+                self.assigned.insert(*target);
+                self.walk(value, true, hir.id)
+            }
             HirKind::SetCell { cell, value } => {
                 self.walk(cell, true, hir.id);
                 self.walk(value, true, hir.id);
@@ -264,15 +278,7 @@ impl LastUseBuilder<'_> {
             // binder node would be a bound no read could lower, which holds a
             // binding a closure captures to the form's end
             // (docs/impl/region/lastuse.md).
-            HirKind::Let { bindings, body } => {
-                for (b, init) in bindings {
-                    self.binding_init.entry(*b).or_default().push(init.id);
-                    self.binding_scope.entry(*b).or_default().push(hir.id);
-                    self.walk(init, true, init.id);
-                }
-                self.walk(body, parent_consumes, parent_id);
-            }
-            HirKind::Letrec { bindings, body } => {
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.binding_scope.entry(*b).or_default().push(hir.id);
@@ -293,10 +299,10 @@ impl LastUseBuilder<'_> {
                 self.iter_scope_stack.pop();
             }
 
-            // Begin: only the LAST expression propagates (its value is
-            // the form's value). Earlier expressions are statements;
+            // Begin and Block: only the LAST expression propagates (its value
+            // is the form's value). Earlier expressions are statements;
             // their values die at their own ids.
-            HirKind::Begin(exprs) => {
+            HirKind::Begin(exprs) | HirKind::Block { body: exprs, .. } => {
                 let last_ix = exprs.len().saturating_sub(1);
                 for (i, e) in exprs.iter().enumerate() {
                     if i == last_ix {
@@ -313,16 +319,6 @@ impl LastUseBuilder<'_> {
             HirKind::And(exprs) | HirKind::Or(exprs) => {
                 for e in exprs {
                     self.walk(e, parent_consumes, parent_id);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                let last_ix = body.len().saturating_sub(1);
-                for (i, e) in body.iter().enumerate() {
-                    if i == last_ix {
-                        self.walk(e, parent_consumes, parent_id);
-                    } else {
-                        self.walk(e, false, hir.id);
-                    }
                 }
             }
 

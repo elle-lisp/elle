@@ -1,6 +1,6 @@
 # Documentation policy
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 <!-- policy: 2026-11-12 -->
 
 Every document and every source file says what is true now, names the document
@@ -389,7 +389,7 @@ that carries this file. These rules belong to this one.
   names. A file stamped with a deviation is exempt from all of them. The stamp
   claims sentence length and repeated sentences by hand.
 - [The audit queue](docs/impl/audit.md) owns `scripts/audit`: the queue, the
-  commit gate, the three files exempt by name, and the counts
+  commit gate, the files exempt by name, and the counts
   [the audit producer](tests/ratchet/audit.lisp) pins.
 - A module under `lib/` keeps its documents under `docs/stdlib/`, at the path
   the module has under `lib/`. `elle` runs a `.md` file as a program, and a

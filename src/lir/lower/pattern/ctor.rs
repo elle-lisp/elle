@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! The constructor tests a decision-tree switch branches on, and the literal comparison patterns share.
 //!
 //! src/lir/lower/overview.md
@@ -121,6 +121,7 @@ impl<'a> Lowerer<'a> {
             PatternLiteral::Keyword(k) => {
                 self.emit_const(ConstRef::Keyword(crate::value::keyword::keyword_hash(k)))?
             }
+            PatternLiteral::Symbol(id) => self.emit_const(ConstRef::Symbol(*id))?,
             PatternLiteral::String(_) => unreachable!("string handled above"),
         };
         let dst = self.fresh_reg();

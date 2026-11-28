@@ -1,6 +1,6 @@
 # Bodies across epochs 17 and 18
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-24 -->
 
 The epoch 17 and 18 rules: a `def` outside a body moves into a `let`, and an early-read `def` moves up or joins a `letrec`.
 
@@ -46,7 +46,7 @@ forms that each define and then read one name therefore move apart:
 ```lisp
 (defn migrated [source]
   "The forms SOURCE holds, migrated from the epoch it declares, as data."
-  (map syntax->datum (compile/read-forms source "<doc>")))
+  (map syntax/->datum (compile/read-forms source "<doc>")))
 
 (assert (= (migrated "(elle/epoch 16)
                       (g (begin (def a 1) a))

@@ -1,6 +1,6 @@
 # syntax/expand
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-24 -->
 
 Hygienic macro expansion: macro definition, macro calls, quasiquote, and introspection.
 
@@ -42,6 +42,7 @@ Expander
     ├─► check for macro calls
     ├─► compile the transformer once per definition via pipeline::eval_syntax()
     ├─► call the transformer on the arguments via VM::call_transformer()
+    ├─► count each compound argument's copies in the result Value (W006)
     ├─► convert result Value back to Syntax via from_value()
     ├─► flip the expansion's intro scope on the result
     ├─► handle macro? (check registry, return true/false literal)
@@ -70,24 +71,24 @@ The macro's `tmp` has the expansion scope. The outer `tmp` has the call-site sco
 
 ## Macro argument wrapping
 
-A call passes each argument to the transformer closure as a `Value` (`wrap_macro_arg_value`):
-
-- **Atoms** (nil, bool, int, float, string, keyword) pass as the equivalent `Value`, so `false` stays falsy.
-- **Symbols and compound forms** pass as syntax objects (`Value::syntax`), so their scope sets survive the call.
-
-`from_value()` unwraps the syntax objects in the result back to `Syntax`, with their scopes.
+A call passes each argument to the transformer closure as a syntax object, an atom included, so every argument keeps its span and scope set across the call ([docs/macros/syntax.md](../../../docs/macros/syntax.md)). `from_value()` unwraps the syntax objects in the result back to `Syntax`, with their scopes.
 
 ## Quasiquote expansion
 
 Quasiquote is expanded to code that constructs the result at runtime:
 
 - `'x` → `(quote x)` (not expanded)
-- `` `sym `` → a `SyntaxLiteral` node, which carries the template symbol with its scopes
+- `` `sym `` → a `SyntaxLiteral` node, which carries the template symbol with its scopes, while the expander compiles a transformer or a `begin-for-syntax` body; `(quote sym)` everywhere else
 - `` `42 `` → `(quote 42)`: every other form, an atom or a struct for example, is quoted
 - `` `,x `` → `x` (unquote — evaluate)
-- `` `(a ,;xs) `` → `(append (list a) xs)`: a splice cuts the list into segments that `append` joins
-- `` `[a ,b] `` → `(array a b)`
-- Nested quasiquotes increase depth; nested unquotes decrease depth
+- `` `(a ,;xs) `` → `(list a ;xs)`: the call's splice spreads a list, an array or an `@array`. In a transformer or `begin-for-syntax` body the spread value is `(let [spread xs] (if (%eq (type-of spread) :syntax) (syntax/children spread) spread))`, so a syntax argument spreads its children
+- `` `[a ,b] `` → `(array a b)`, with a splice for each `,;`
+- Nested quasiquotes increase depth; nested unquotes decrease depth, and an inner level stays a `quasiquote`, `unquote` or `unquote-splicing` form in the value
+- `` `'(a ,x) `` → `(list 'quote (list 'a x))`: a quote keeps the depth, so the holes inside it evaluate
+
+The reader and `from_value` build a quoting node for its list spelling as well
+([docs/impl/syntax.md](../../../docs/impl/syntax.md)), so every arm here
+matches a node, never a list.
 
 `quasiquote_to_code()` does the conversion, in [quasiquote.rs](quasiquote.rs).
 
@@ -96,7 +97,7 @@ Quasiquote is expanded to code that constructs the result at runtime:
 Two compile-time introspection forms:
 
 - **`(macro? name)`** — Check if `name` is a registered macro. Returns a literal `true` or `false` (not evaluated at runtime).
-- **`(expand-macro form)`** — Expand a quoted form using the current macro registry. Returns the expanded form wrapped in `quote`.
+- **`(expand-macro form)`** — Expand a quoted form using the current macro registry. Returns the expanded form wrapped in `quote`. Any other argument is an error that names `expand-macro`.
 
 Both are handled by the Expander during expansion, not as runtime primitives.
 
@@ -122,36 +123,37 @@ The `Expander` maintains:
 - `unit: Unit` — The unit under expansion: its tag, the count of scopes it has minted, and the count of names `gensym` has answered. `begin_unit` sets the tag and starts both counts at zero. A transformer call and a `begin-for-syntax` body lend the tag and the gensym count to the VM, where `gensym` reads them while the expansion runs. A transformer's compile runs in a unit of its own, and the caller's unit resumes after it ([docs/impl/syntax.md](../../../docs/impl/syntax.md))
 - `includes` — The chain of files being included, which the cycle check reads. `begin_unit` empties it.
 - `expansion_depth: usize` — Current recursion depth (bounded at 200)
+- `findings` — The `W006` warnings the expansions found, which `take_findings` hands over. A clone starts with none. `check_argument_placed_twice` ([placed.rs](../../lint/rules/placed.rs)) counts an argument's copies by the identity of the value the transformer received, because a form one macro builds for another carries the outer call's span
 
 ## Prelude macros
 
-[src/prelude.lisp](../../prelude.lisp) defines the everyday forms as ordinary macros, and [docs/macros.md](../../../docs/macros.md) lists them. `Expander::load_prelude()` loads them before user code expands.
+[src/prelude.lisp](../../prelude.lisp) defines the everyday forms as ordinary macros, and [docs/macros.md](../../../docs/macros.md) lists them. `Expander::load_prelude()` ([prelude.rs](prelude.rs)) loads them before user code expands.
 
 ## Syntax objects in the Value system
 
-`SyntaxKind::SyntaxLiteral(SynRef)` is an internal-only variant that carries a hygiene-bearing template symbol as plain compile-time data. Quasiquote creates it so a template symbol's scope set survives the Value round-trip during macro expansion; the Analyzer materializes it as an ordinary allocation per execution via `ConstTemplate::SyntaxSymbol`.
+`SyntaxKind::SyntaxLiteral(SynRef)` is an internal-only variant that carries a hygiene-bearing template symbol as plain compile-time data. Quasiquote creates it in a transformer or `begin-for-syntax` body, so a template symbol's scope set survives the Value round-trip during macro expansion; the Analyzer materializes it as an ordinary allocation per execution via `ConstTemplate::SyntaxSymbol`.
 
 ## Arenas
 
 The expander holds two. `arena` is the working arena of the unit under expansion, which the pipeline sets per unit. `templates` is the instance's process-root arena, where `handle_defmacro` copies a macro template so it outlives the unit that defined it. `map_scope_recursive` COPIES, because subtrees are shared by pointer: a walk that wrote through the source would stamp trees the caller still holds. [The syntax tree](../../../docs/impl/syntax.md) owns where a node lives.
 
-## Hygiene escape hatch: `datum->syntax`
+## Hygiene escape hatch: `syntax/<-datum`
 
-`(datum->syntax context datum)` creates a syntax object with the context's scope set and `scope_exempt: true`. Neither the intro-scope stamp on the arguments nor the flip on the result touches it, so the datum resolves at the call site. Used for anaphoric macros:
+`(syntax/<-datum context datum)` creates a syntax object with the context's scope set and `scope_exempt: true`. Neither the intro-scope stamp on the arguments nor the flip on the result touches it, so the datum resolves at the call site. Used for anaphoric macros:
 
 ```lisp
 (defmacro aif (test then else)
-  `(let [,(datum->syntax test 'it) ,test]
-     (if ,(datum->syntax test 'it) ,then ,else)))
+  `(let [,(syntax/<-datum test 'it) ,test]
+     (if ,(syntax/<-datum test 'it) ,then ,else)))
 ```
 
-`(syntax->datum stx)` strips scope information, returning the plain value.
+`(syntax/->datum stx)` strips scope information, returning the plain value.
 
 ## Invariants
 
-1. **Scope walks skip exempt nodes.** `add_scope_recursive()` stamps a scope on a tree. `flip_scope_recursive()` adds the intro scope where a node lacks it and removes it where a node has it. Both skip a node with `scope_exempt: true`, which `datum->syntax` sets. Two identifiers match only if their scope sets are compatible.
+1. **Scope walks skip exempt nodes.** `add_scope_recursive()` stamps a scope on a tree. `flip_scope_recursive()` adds the intro scope where a node lacks it and removes it where a node has it. Both skip a node with `scope_exempt: true`, which `syntax/<-datum` sets. Two identifiers match only if their scope sets are compatible.
 
-2. **Quote forms are not expanded.** `'x` remains `Quote(Symbol("x"))`. The analyzer handles quote specially.
+2. **Quote forms are not expanded.** `'x` and `(quote x)` both remain `Quote(Symbol("x"))`. The analyzer handles quote specially.
 
 3. **Quasiquote/unquote must be expanded.** If analysis sees raw `Quasiquote`, `Unquote`, or `UnquoteSplicing`, expansion failed.
 
@@ -190,12 +192,11 @@ The expander holds two. `arena` is the working arena of the unit under expansion
 - **Adding a new prelude macro**: Add to [prelude.lisp](../../prelude.lisp), not here
 - **Changing macro expansion algorithm**: Update `expand_into()` in [mod.rs](mod.rs)
 - **Changing quasiquote semantics**: Update [quasiquote.rs](quasiquote.rs)
-- **Changing macro argument wrapping**: Update `wrap_macro_arg_value()` in [macro_expand.rs](macro_expand.rs)
 - **Adding introspection forms**: Update [introspection.rs](introspection.rs)
 
 ## Common pitfalls
 
 - **Breaking hygiene**: When creating synthetic identifiers, make sure that they carry the correct scope set
 - **Forgetting to expand recursively**: After macro expansion, the result must be recursively expanded (with depth limit)
-- **Not preserving scope sets**: A symbol or compound argument crosses the transformer call as a syntax object, which must keep its scope set through the Value round-trip
-- **Conflating `quote` and `SyntaxLiteral`**: a template atom is quoted; a template symbol is a `SyntaxLiteral`, which keeps its scopes
+- **Not preserving scope sets**: An argument crosses the transformer call as a syntax object, which must keep its scope set through the Value round-trip
+- **Conflating `quote` and `SyntaxLiteral`**: a template atom is quoted; a template symbol in a transformer body is a `SyntaxLiteral`, which keeps its scopes

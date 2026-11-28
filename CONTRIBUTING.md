@@ -1,6 +1,6 @@
 # Contributing to Elle
 
-<!-- audited: 2026-11-26 -->
+<!-- audited: 2026-11-27 -->
 
 How to work on Elle: the test policy that keeps main green, the order of work,
 and what a change has to carry before we can take it.
@@ -132,7 +132,12 @@ system-wide `elle` on your `PATH`, never from a build of the tree you commit.
 It refuses a commit that stages a `.lisp` file when there is none. It passes
 no `--no-epoch`, so it also migrates a Lisp file that declares an older epoch
 and tags a file that declares none. When a formatter fails on a file, the hook
-refuses the commit. After cloning, enable it with:
+refuses the commit.
+
+The hook also rebuilds the generated `AGENTS.md` indexes, and stages each
+index that changed. It never stages a hand-written `AGENTS.md`, so an edit to
+one goes into a commit only when you stage that edit. After cloning, enable
+the hook with:
 
 ```sh
 git config core.hooksPath .githooks

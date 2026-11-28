@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 // The audit queue and its commit gate.
 //
 // docs/impl/audit.md
@@ -268,34 +268,36 @@ fn the_makefile_is_exempt_from_the_queue_and_from_the_gate() {
 }
 
 #[test]
-fn the_standard_library_is_exempt_from_the_queue_and_from_the_gate() {
-    // The trap: src/stdlib.lisp is read through `(doc name)`, one docstring
-    // at a time, so a reading budget over it measures a distance no reader
-    // travels. Queued, it is debt no audit can pay.
+fn the_standard_library_and_the_prelude_are_exempt_from_the_queue_and_from_the_gate() {
+    // The trap: both files are read through `(doc name)`, one docstring at a
+    // time, so a reading budget over either measures a distance no reader
+    // travels. Queued, each is debt no audit can pay.
     //
-    // The counter-factual: exempt `*.lisp` or `src/*` and the other preludes
-    // leave the queue with it, silently. They sit beside it and each fits the
-    // budget, so each is read whole and is audited like any other source.
+    // The counter-factual: exempt `*.lisp` or `src/*` and the core leaves the
+    // queue with them, silently. It is read whole like any other source.
     let t = Tree::new("stdlib");
     t.write("src/stdlib.lisp", &doc(None, 400))
         .write("src/prelude.lisp", &doc(None, 400))
+        .write("src/core.lisp", &doc(None, 400))
         .write("lib/http.lisp", &doc(None, 400));
 
-    let out = t.staged("src/stdlib.lisp");
     let q = t.queue();
+    for path in ["src/stdlib.lisp", "src/prelude.lisp"] {
+        let out = t.staged(path);
+        assert!(
+            out.status.success(),
+            "{path} must pass the gate unstamped: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !q.iter().any(|p| p.ends_with(path)),
+            "`(doc name)` is how {path} is read, so it is not queued: {q:?}"
+        );
+    }
     assert!(
-        out.status.success(),
-        "the standard library must pass the gate unstamped: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        !q.iter().any(|p| p.ends_with("stdlib.lisp")),
-        "`(doc name)` is how the standard library is read, so it is not queued: {q:?}"
-    );
-    assert!(
-        q.iter().any(|p| p.ends_with("src/prelude.lisp"))
+        q.iter().any(|p| p.ends_with("src/core.lisp"))
             && q.iter().any(|p| p.ends_with("lib/http.lisp")),
-        "the exemption is the one path; every other Lisp file stays queued: {q:?}"
+        "the exemption names two paths; every other Lisp file stays queued: {q:?}"
     );
 }
 

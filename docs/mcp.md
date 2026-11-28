@@ -1,6 +1,6 @@
 # MCP Server
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-27 -->
 
 The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
 
@@ -357,8 +357,9 @@ Parameters:
 - `path` — the file, required for `"single"`
 - `jit` (optional) — `"off"`, `"eager"` or `"adaptive"`. A make target gets it
   as `ELLE_JIT` in the environment, which the binary does not read. A single
-  file gets it as `--jit=0` or `--jit=1`, which `elle` refuses as an unknown
-  option ([config.md](config.md)), so a `"single"` run with `jit` set fails.
+  file gets `"off"` as `--jit=0`, which makes the JIT eager, and `"eager"` as
+  `--jit=1`, a threshold of one call ([config.md](config.md)). So a `"single"`
+  run with `jit` set runs another policy than the one it names.
 
 The answer:
 ```json

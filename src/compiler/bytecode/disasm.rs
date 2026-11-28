@@ -104,7 +104,9 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (index={})", idx));
                 i += 2;
             }
-            Instruction::StructGetOrNil | Instruction::StructGetDestructure
+            Instruction::StructGetOrNil
+            | Instruction::StructHasKey
+            | Instruction::StructGetDestructure
                 if i + 1 < instructions.len() =>
             {
                 let idx = u16_at(instructions, i);

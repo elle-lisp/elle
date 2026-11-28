@@ -1,5 +1,6 @@
 // audited: 2026-11-25
-//! Reads that take a value apart: a pair's halves, an array element or slice, a struct field, and the silent forms.
+//! Reads that take a value apart: a pair's halves, an array element or slice, a
+//! struct field or key test, and the silent forms.
 //!
 //! docs/impl/bytecode.md
 
@@ -10,18 +11,28 @@ use super::*;
 /// The pattern and access-path lowerers build only keyword and symbol keys, so
 /// a string one never reaches the emitter — a constant pool has no region, and
 /// a string is a heap value that would need one.
-fn struct_key(key: &ConstRef, site: &str) -> Value {
+fn struct_key(key: &ConstRef, op: Instruction) -> Value {
     match key {
         ConstRef::Keyword(hash) => Value::keyword_from_hash(*hash),
         ConstRef::Int(n) => Value::int(*n),
         ConstRef::Symbol(sym) => Value::symbol(*sym),
         ConstRef::Bool(b) => Value::bool(*b),
         ConstRef::Nil => Value::NIL,
-        _ => panic!("{site}: unsupported key type"),
+        _ => panic!("{op:?}: unsupported key type"),
     }
 }
 
 impl Emitter {
+    /// A read of one struct key: `op`, then the key's constant-pool index.
+    fn emit_keyed_read(&mut self, dst: Reg, src: Reg, key: &ConstRef, op: Instruction) {
+        self.ensure_on_top(src);
+        let const_idx = self.bytecode.add_constant(struct_key(key, op));
+        self.bytecode.emit(op);
+        self.bytecode.emit_u16(const_idx);
+        self.pop();
+        self.push_reg(dst);
+    }
+
     /// The destructuring reads (chain link from `emit_instr`).
     pub(super) fn emit_instr_destructure(&mut self, instr: &InstrRef<'_>) {
         match instr {
@@ -71,25 +82,15 @@ impl Emitter {
             }
 
             InstrRef::StructGetOrNil { dst, src, key } => {
-                self.ensure_on_top(*src);
-                let const_idx = self
-                    .bytecode
-                    .add_constant(struct_key(key, "StructGetOrNil"));
-                self.bytecode.emit(Instruction::StructGetOrNil);
-                self.bytecode.emit_u16(const_idx);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_keyed_read(*dst, *src, key, Instruction::StructGetOrNil)
+            }
+
+            InstrRef::StructHasKey { dst, src, key } => {
+                self.emit_keyed_read(*dst, *src, key, Instruction::StructHasKey)
             }
 
             InstrRef::StructGetDestructure { dst, src, key } => {
-                self.ensure_on_top(*src);
-                let const_idx = self
-                    .bytecode
-                    .add_constant(struct_key(key, "StructGetDestructure"));
-                self.bytecode.emit(Instruction::StructGetDestructure);
-                self.bytecode.emit_u16(const_idx);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_keyed_read(*dst, *src, key, Instruction::StructGetDestructure)
             }
 
             InstrRef::StructRest {

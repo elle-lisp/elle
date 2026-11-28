@@ -160,14 +160,14 @@ pub(crate) struct RegionStore {
     /// store's page (worker thread reading a parent-heap value) is never
     /// generation-compared.
     store_id: u32,
-    /// Active mint log for a *closed allocation scope* (macro expansion,
-    /// docs/impl/region/macroscope.md). When `Some`, the log records every id
-    /// `new_runtime_region` mints, with the generation it is about to be
-    /// stamped at. So the scope's reclaim pass can balance each surviving
-    /// region's unexplained references. The generation also tells a recycled id
-    /// (freed and reminted mid-scope) from its earlier incarnation. `None`
-    /// outside such a scope (the common case: one branch on the mint path).
-    mint_log: Option<Vec<(u32, u32)>>,
+    /// The mint log of each open closed allocation scope, innermost last: each
+    /// id `new_runtime_region` mints, with its generation, so the scope's
+    /// reclaim can balance it (docs/impl/region/macroscope.md). Empty outside
+    /// such a scope.
+    mint_logs: Vec<Vec<(u32, u32)>>,
+    /// The counted references a Rust structure holds, by physical id, which a
+    /// mint scope's reclaim counts as explained (a transformer cell's closure).
+    rust_holds: FxHashMap<u32, u32>,
     /// Where each id was last minted, keyed by physical region id — the
     /// `--trace=arena` attribution `arena/dump` prints beside a region's tags
     /// (docs/impl/region/diagnostics.md). A tag census says a retained region
@@ -269,7 +269,8 @@ impl RegionStore {
             free_physical: Vec::new(),
             generations: Vec::new(),
             store_id: NEXT_STORE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            mint_log: None,
+            mint_logs: Vec::new(),
+            rust_holds: FxHashMap::default(),
             mint_sites: std::collections::HashMap::new(),
             trace,
             over_frees: 0,

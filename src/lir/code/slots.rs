@@ -1,4 +1,4 @@
-// audited: 2026-11-27
+// audited: 2026-11-28
 //! The local slots an instruction names, each as a read or a store, which slot liveness walks.
 //!
 //! src/lir/overview.md
@@ -78,11 +78,13 @@ impl InstrRef<'_> {
             | I::LoadCaptureCell { .. }
             | I::StoreCaptureCell { .. }
             | I::MatchFail { .. }
+            | I::SyntaxView { .. }
             | I::FirstDestructure { .. }
             | I::RestDestructure { .. }
             | I::ArrayMutRefDestructure { .. }
             | I::ArraySliceFrom { .. }
             | I::ArrayMutSliceFrom { .. }
+            | I::StructHasKey { .. }
             | I::StructGetOrNil { .. }
             | I::StructGetDestructure { .. }
             | I::StructRest { .. }

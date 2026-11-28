@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! Source location tracking: where a form came from, in bytes a region can
 //! hold.
 //!
@@ -20,7 +20,7 @@ use super::files::{self, FileId};
 /// inside a closure template's `origin`, so it must be plain bytes
 /// (docs/impl/syntax.md). The file name lives in the process-wide
 /// interner and the span carries its [`FileId`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub start: u32,
     pub end: u32,

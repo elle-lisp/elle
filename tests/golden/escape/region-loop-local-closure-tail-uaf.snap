@@ -153,19 +153,19 @@
     block4: DecrefRegion s21
     block4: DecrefValueRegion v24
     block4: IncrefValueRegion v27
-    block19: DecrefValueRegion v54
+    block19: DecrefValueRegion v55
     block21: DecrefRegion s22
     block21: DecrefRegion s23
-    block23: IncrefValueRegion v75
-    block23: DecrefValueRegion v76
-    block23: DecrefValueRegion v79
-    block22: DecrefValueRegion v81
-    block22: DecrefValueRegion v83
-    block3: DecrefValueRegion v91
-    block3: DecrefCellRegion v93
-    block1: DecrefValueRegion v100
-    block1: DecrefValueRegion v102
-    block1: IncrefValueRegion v99
+    block23: IncrefValueRegion v76
+    block23: DecrefValueRegion v77
+    block23: DecrefValueRegion v80
+    block22: DecrefValueRegion v82
+    block22: DecrefValueRegion v84
+    block3: DecrefValueRegion v92
+    block3: DecrefCellRegion v94
+    block1: DecrefValueRegion v101
+    block1: DecrefValueRegion v103
+    block1: IncrefValueRegion v100
   ; closure[6] <anon>
     block0: IncrefValueRegion v1
     block0: TailCall defer_callee_release=false

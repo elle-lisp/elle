@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! Every registered migration, ordered by epoch: the data one epoch bump adds.
 //!
 //! docs/epochs.md
@@ -162,4 +162,43 @@ static LATER: &[Migration] = &[
         rules: &[MigrationRule::DefsBeforeReads],
         lexical: &[],
     },
+    Migration {
+        epoch: 19,
+        summary: "the syntax operations move under syntax/: syntax/->datum for \
+                  syntax->datum, syntax/<-datum for datum->syntax, syntax/e for syntax-e, \
+                  and the rest; the bare names and the meta/ spellings go; and \
+                  three changes no rule can carry: if-let's else form sees every name, \
+                  read and syntax/->datum answer a struct or set literal as its value, \
+                  and a macro receives an atom argument as a syntax object",
+        rules: &[
+            rename("syntax->datum", "syntax/->datum"),
+            rename("meta/syntax->datum", "syntax/->datum"),
+            rename("datum->syntax", "syntax/<-datum"),
+            rename("meta/datum->syntax", "syntax/<-datum"),
+            rename("syntax-e", "syntax/e"),
+            rename("meta/syntax-e", "syntax/e"),
+            rename("syntax-pair?", "syntax/pair?"),
+            rename("meta/syntax-pair?", "syntax/pair?"),
+            rename("syntax-list?", "syntax/list?"),
+            rename("meta/syntax-list?", "syntax/list?"),
+            rename("syntax-symbol?", "syntax/symbol?"),
+            rename("meta/syntax-symbol?", "syntax/symbol?"),
+            rename("syntax-keyword?", "syntax/keyword?"),
+            rename("meta/syntax-keyword?", "syntax/keyword?"),
+            rename("syntax-nil?", "syntax/nil?"),
+            rename("meta/syntax-nil?", "syntax/nil?"),
+            rename("syntax->list", "syntax/->list"),
+            rename("meta/syntax->list", "syntax/->list"),
+            rename("syntax-first", "syntax/first"),
+            rename("meta/syntax-first", "syntax/first"),
+            rename("syntax-rest", "syntax/rest"),
+            rename("meta/syntax-rest", "syntax/rest"),
+        ],
+        lexical: &[],
+    },
 ];
+
+/// The rule that renames `old` to `new`.
+const fn rename(old: &'static str, new: &'static str) -> MigrationRule {
+    MigrationRule::Rename { old, new }
+}

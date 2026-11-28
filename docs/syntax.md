@@ -1,6 +1,6 @@
 # Syntax
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-24 -->
 
 The literals and reader-level constructs of Elle source, from numbers and
 string escapes to quoting and collections.
@@ -121,15 +121,55 @@ calls and collection literals.
 (first '(a b c))    # => a
 ```
 
-Quasiquote (`` ` ``) builds templates. `,expr` unquotes (evaluates one
-subexpression). `,;expr` unquote-splices (evaluates and spreads).
+Quasiquote (`` ` ``) quotes a template with holes. `,expr` is a hole: it
+evaluates `expr` and puts the value in its place. `,;expr` evaluates `expr` and
+spreads its elements in its place, from a list, an array or an `@array`. A
+template with no hole is the quote of the same form, and its symbols are
+symbols. [macros.md](macros.md) states what a template builds in a macro body.
 
 ```lisp
 (let [x 10]
-  `(a ,x b))        # => (a 10 b)
+  (assert (= `(a ,x b) '(a 10 b))))
 
-(let [items '(2 3 4)]
-  `(1 ,;items 5))   # => (1 2 3 4 5)
+(let [items '(2 3)]
+  (assert (= `(1 ,;items 4) '(1 2 3 4))))
+(assert (= `(1 ,;[2 3] ,;@[4] 5) '(1 2 3 4 5)) "an array spreads too")
+(assert (= `[0 ,;'(1 2)] [0 1 2]) "into an array template as well")
+
+(assert (= `(a b) '(a b)))
+(assert (= (type-of (first `(a))) :symbol))
+```
+
+A template nests. Each quasiquote raises the level by one and each unquote
+lowers it by one, and only an unquote that reaches level zero evaluates. An
+inner level stays in the value as a quasiquote form. A quote inside a template
+does not change the level, so a hole inside the quote still evaluates.
+
+```lisp
+(let [n 5]
+  (assert (= `(a `(b ,,n)) '(a `(b ,5))))
+  (assert (= `(a ',n) '(a '5)) "a hole inside a quote")
+  (assert (= `(a (quote ,n)) '(a (quote 5))) "in either spelling"))
+```
+
+Each reader prefix is a short spelling of a list:
+
+| Prefix | List |
+|--------|------|
+| `'x` | `(quote x)` |
+| `` `x `` | `(quasiquote x)` |
+| `,x` | `(unquote x)` |
+| `,;x` | `(unquote-splicing x)` |
+
+The two spellings are one form wherever a form comes from: source text, a
+datum that `eval` compiles, or the result of a macro. `read` answers the list
+for either spelling.
+
+```lisp
+(assert (= (quasiquote (a (unquote (+ 1 2)))) '(a 3)))
+(assert (= (eval '(quote (when true 1))) '(when true 1)) "a quoted form stays data")
+(assert (= (eval '`(a ,(+ 1 2))) '(a 3)))
+(assert (= (read "'x") '(quote x)))
 ```
 
 ## Collection literals
@@ -180,6 +220,45 @@ built one value or two.
   (assert (= (freeze b) "xy") "each run of @\"x\" builds a new buffer"))
 ```
 
+## Source as data
+
+`read` and `read-all` turn source text into data, and `syntax/->datum` turns a
+syntax object into the same data ([macros/syntax.md](macros/syntax.md)). A
+literal reads as the value it writes: a string for `"foo"`, an array for
+`[1 x]`, a struct for `{:a 1}` and a set for `|x y|`. The `@` forms read as
+their mutable kinds. A part of a literal that is code stays code: `{:a (f x)}`
+reads as a struct whose value is the list `(f x)`. `eval` runs that data as
+the literal would run.
+
+A bytes literal reads as a call of `bytes`, because its elements are
+expressions and a bytes value holds only integers. A quote differs from
+`read`: a quoted struct, set or bytes literal is a call, so `'{:a 1}` is the
+list `(struct :a 1)`.
+
+```lisp
+(assert (= (read "{:a (f x)}") {:a '(f x)}) "a struct whose value is code")
+(assert (= (type-of (read "@{:a 1}")) :@struct))
+(assert (= (read "|x y|") |'x 'y|))
+(assert (= (read "b[1 2]") '(bytes 1 2)) "a bytes literal is a call")
+(assert (= '{:a 1} '(struct :a 1)) "a quote keeps the call")
+(assert (= (eval (read "{:a (+ 1 2)}")) {:a 3}))
+```
+
+The value decides what the literal repeats. A repeated key keeps its last
+value, as the running struct does, and a repeated set element is one element.
+Keys and elements come in the value's order, not the order the source writes.
+A key that no struct holds, a float or a mutable literal, signals
+`:type-error`.
+
+```lisp
+(assert (= (read "{:a 1 :a 2}") {:a 2}) "the last value of a repeated key")
+(assert (= (length (read "|(f) (f)|")) 1) "a repeated element is one")
+(assert (= (get (get (protect (read "{1.5 :x}")) 1) :error) :type-error))
+(assert (= (get (get (protect (read "{@[1] :x}")) 1) :error) :type-error))
+```
+
+`read` runs at run time, so a file of any epoch reads the same data.
+
 ## Truthiness
 
 Only `nil` and `false` are falsy. Everything else is truthy, including
@@ -199,5 +278,6 @@ Only `nil` and `false` are falsy. Everything else is truthy, including
 ## See also
 
 - [types.md](types.md) — type system and type predicates
-- [macros.md](macros.md) — macro expansion and syntax objects
+- [macros.md](macros.md) — macro expansion and hygiene
+- [macros/syntax.md](macros/syntax.md) — syntax objects
 - [warts.md](warts.md) — intentional differences from other Lisps

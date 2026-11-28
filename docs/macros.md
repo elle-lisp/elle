@@ -1,15 +1,18 @@
 # Macros
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-24 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
-sets of scopes; `datum->syntax` breaks hygiene on purpose.
+sets of scopes; `syntax/<-datum` breaks hygiene on purpose.
+
+This document states what a macro does today.
+[The design](macros/overview.md) states what the macro system becomes.
 
 ## Defining a macro
 
 A macro is a name, a parameter list and a body. At expansion time the arguments
-arrive unevaluated, the body runs in the VM, and the syntax it returns replaces
-the call. The whole language is available in a macro body: `if`, `let`,
+arrive unevaluated, each as a syntax object ([syntax.md](macros/syntax.md)).
+The body runs in the VM, and the syntax it returns replaces the call. The whole language is available in a macro body: `if`, `let`,
 closures, recursion. The body usually builds its result with quasiquote.
 
 ```lisp
@@ -27,20 +30,97 @@ closures, recursion. The body usually builds its result with quasiquote.
   is limited to 200, which stops an expansion that never ends.
 - **`(macro? name)`** answers whether `name` names a macro, at expansion time.
 - **`(expand-macro 'form)`** expands a quoted form and returns the result as
-  data. Write the argument with `'`: a written-out `(quote form)` comes back
-  unexpanded (#1229).
+  data. Any argument that is not a quoted form is a compile error that names
+  `expand-macro`.
 - **A `defmacro` form expands to `nil`**, so a definition inside a `begin`
   produces no code.
+
+```lisp
+(assert (= (expand-macro (quote (my-when ok (f)))) '(if ok (begin (f)) nil)))
+(let [[ok? err] (protect (compile/whole-module "(expand-macro (f 1))" "<doc>"))]
+  (assert (not ok?))
+  (assert (string/contains? (get err :message) "expand-macro")))
+```
+
+## A template builds code
+
+A quasiquote in a macro body, or in a `begin-for-syntax` definition, builds
+code. Each symbol of its template is a syntax object, which carries the scopes
+of the place the template was written, as the hygiene section below states. A
+quasiquote anywhere else builds data, and its symbols are symbols
+([syntax.md](syntax.md)).
+
+In such a template, `,;` spreads a syntax object's children, so an argument
+written as a list or an array spreads as its forms:
+
+```lisp
+(defmacro let-all [bindings & body] `(let [,;bindings] ,;body))
+(assert (= (let-all [a 1 b 2] (+ a b)) 3))
+```
+
+A macro may return a template that holds another template, so a macro can
+define a macro. The inner level reaches the defined macro as a quasiquote.
+
+```lisp
+(defmacro def-adder [name n]
+  `(defmacro ,name [x] `(+ ,x ,,n)))
+(def-adder add5 5)
+(assert (= (add5 1) 6))
+
+(eval '(defmacro inc1 [x] `(+ ,x 1)))
+(assert (= (eval '(inc1 2)) 3))
+
+(defmacro quoted-when [] (list 'quote '(when true 1)))
+(assert (= (quoted-when) '(when true 1)) "a quote a macro returns stays data")
+```
 
 Two limits, both listed in [warts.md](warts.md): a macro cannot return an
 improper list such as `(pair 1 2)`, and a macro cannot be exported from a
 module.
 
+## A template places each argument once
+
+A template that puts one argument at two positions compiles the argument twice,
+and evaluates it twice when both positions run. A nested call of such a macro
+multiplies its body at every level ([types.md](macros/types.md)). So the
+expander checks each expansion, and the linter warns with `W006`
+`argument-placed-twice` at an argument the expansion holds more than once:
+
+- **A compound argument counts**: a list, an array, a struct or a set form. A
+  name or a literal may appear at any number of positions, because a copy of
+  one costs nothing.
+- **A position inside a quote does not count**, because a quote does not run.
+  `assert` quotes its predicate beside the one position that evaluates it.
+- **A position inside another macro call counts**, because that call may place
+  the argument in turn.
+
+The warning names the macro. Bind the argument once with `let`, or join the
+arms that compute one value with `block` and `break` ([types.md](macros/types.md)).
+No macro in the prelude places an argument twice.
+
+```lisp
+(defn placed-twice [src]
+  (filter (fn [d] (= (get d :rule) "argument-placed-twice"))
+          (compile/diagnostics (compile/analyze src))))
+
+(def twice "(defmacro twice [x] `(begin ,x ,x))\n")
+(let [found (placed-twice (string twice "(twice (println 1))"))]
+  (assert (= (length found) 1) "a call placed twice")
+  (assert (= (get (first found) :code) "W006"))
+  (assert (string/contains? (get (first found) :message) "twice") "naming the macro"))
+(assert (empty? (placed-twice (string twice "(def y 1) (twice y)")))
+        "a name copies freely")
+(assert (empty? (placed-twice "(defmacro show [x] `(begin (quote ,x) ,x))\n(show (println 1))"))
+        "a quote does not run")
+(assert (empty? (placed-twice "(each x in [1 2] (println x))")))
+(assert (empty? (placed-twice "(if-let [a 1 b 2] (println a b) (list))")))
+```
+
 ## What a macro body may do
 
 A macro body runs while a compile waits for it, and what it returns becomes
 part of the unit. So the unit's own inputs decide what the body does. It may
-raise, but it reads no state outside the unit and changes none:
+signal an error, but it reads no state outside the unit and changes none:
 
 - **A macro call runs under a fuel budget** ([runtime.md](runtime.md)). The
   budget counts silent code, the fibers the body resumes and the expansions it
@@ -197,44 +277,28 @@ earlier `eval` made.
   (assert (not ok?) "a later eval does not see the helper"))
 ```
 
-## Breaking hygiene on purpose: `datum->syntax`
+## Breaking hygiene on purpose: `syntax/<-datum`
 
-`(datum->syntax context datum)` builds a syntax object that carries
+`(syntax/<-datum context datum)` builds a syntax object that carries
 `context`'s scopes, and the intro scope is never stamped on it. It therefore
 binds and resolves at the call site, which is what an anaphoric macro needs:
 
 ```lisp
 (defmacro aif (test then else)
-  `(let [,(datum->syntax test 'it) ,test]
-     (if ,(datum->syntax test 'it) ,then ,else)))
+  `(let [,(syntax/<-datum test 'it) ,test]
+     (if ,(syntax/<-datum test 'it) ,then ,else)))
 
 (assert (= (aif (+ 1 2) (+ it 10) 0) 13))
 ```
 
-When `context` is a plain value rather than a syntax object (an atom argument
-arrives as a plain value), the result gets empty scopes, and ordinary lexical
-scoping applies. `(syntax->datum stx)` strips the scopes and returns the plain
-value.
+When `context` is a plain value rather than a syntax object, the result gets
+empty scopes, and ordinary lexical scoping applies. `(syntax/->datum stx)`
+strips the scopes and returns the plain value.
 
-## Pattern matching on syntax: `syntax-case`
+## Syntax objects
 
-`syntax-case` matches a syntax object against patterns: `_`, a pattern
-variable, a literal, `(literal sym)` for a symbol, or a list of patterns. A
-clause may carry a `when` guard.
-
-```lisp
-(defmacro classify (stx)
-  (syntax-case stx
-    ((literal if) :an-if)
-    (42 :forty-two)
-    ((a b) :a-pair)
-    (_ :other)))
-
-(assert (= (classify if) :an-if))
-(assert (= (classify 42) :forty-two))
-(assert (= (classify (x y)) :a-pair))
-(assert (= (classify z) :other))
-```
+[syntax.md](macros/syntax.md) states what a transformer receives, the
+`syntax/` operations that read and rebuild a node, and `syntax-case`.
 
 ## Macros in the prelude
 

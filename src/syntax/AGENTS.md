@@ -1,6 +1,6 @@
 # syntax
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-11-24 -->
 
 Syntax tree types and macro expansion. Bridge between parsing and analysis.
 
@@ -23,6 +23,7 @@ Does NOT:
 | `Syntax` | Tree node with kind, span, scopes — `Copy` POD, region-resident |
 | `SyntaxKind` | Node variants (Int, Symbol, List, Quote, Set, SetMut, etc.) |
 | `SynRef` | A pointer to one node: the payload of the single-child kinds |
+| `Syntax::view` | One level of a node as data, each child wrapped as the caller asks: what `syntax/e` answers and `match` reads ([view.rs](view.rs)) |
 | `Span` | Source range with line/col, over an interned `FileId` |
 | `ScopeId` | A hygiene scope: the tag of the unit that minted it, the intro bit, and a count within the unit |
 | `UnitTag` | The tag of a unit of expansion: a hash of its source name and its forms as read ([unit.rs](unit.rs)) |
@@ -63,7 +64,7 @@ legal.
 
 [expand/AGENTS.md](expand/AGENTS.md) owns the expander: its data flow, its
 dispatch order, how a call hands its arguments to the transformer, quasiquote,
-`datum->syntax`, and the expander's invariants.
+`syntax/<-datum`, and the expander's invariants.
 [docs/macros.md](../../docs/macros.md) owns the hygiene model and its
 examples, and [docs/impl/syntax.md](../../docs/impl/syntax.md) the layout of a
 `ScopeId`.
@@ -79,7 +80,7 @@ examples, and [docs/impl/syntax.md](../../docs/impl/syntax.md) the layout of a
 1. **Only the hygiene flip removes a scope.** `add_scope()` never removes
    one. The flip of an expansion's intro scope removes it from the nodes that
    came from the arguments. Both tree walks skip a node with
-   `scope_exempt: true`, which `datum->syntax` sets so the node resolves at
+   `scope_exempt: true`, which `syntax/<-datum` sets so the node resolves at
    the call site. Two identifiers match only if their scope sets are
    compatible.
 

@@ -1,3 +1,8 @@
+// audited: 2026-11-24
+//! syntax-case patterns: parse the pattern of a clause, and compile it to a test and the bindings it makes.
+//!
+//! docs/macros/syntax.md
+
 use super::*;
 
 /// Parse a pattern Syntax node into a `Pattern`.
@@ -71,27 +76,28 @@ pub(super) fn collect_pattern_vars(
 
 /// Compile a pattern to (test_expr_or_None, bindings).
 ///
-/// `test_expr` is `None` for unconditional patterns (wildcard, variable).
-/// `bindings` maps pattern variable names to accessor expressions.
-/// `scrut` is always a symbol (the gensym bound to the scrutinee).
+/// `scrut` is an expression that answers the node under test: the bound
+/// scrutinee, or an accessor into it for an element of a list pattern. A test
+/// reads an element through its accessor, because the clause binds its pattern
+/// variables only once the whole test holds. `test_expr` is `None` for an
+/// unconditional pattern (wildcard, variable), and `bindings` maps each
+/// pattern variable to its accessor.
 pub(super) fn compile_pattern(
     arena: &SyntaxArena,
     pat: &Pattern,
     scrut: &Syntax,
     span: &Span,
-    scope: ScopeId,
-    counter: &mut GensymCounter,
 ) -> PatternResult {
-    // Every literal arm below is the same shape: `(= scrut <literal>)`, with
-    // the literal built from the pattern's payload.
-    let equals = |lit: Syntax| make_call(arena, "=", vec![*scrut, lit], *span);
+    // A literal reads the node as data, so an atom argument and an atom inside
+    // a list compare by value, and a plain value passes through unchanged.
+    let datum = || make_call(arena, "syntax/->datum", vec![*scrut], *span);
+    let equals = |lit: Syntax| make_call(arena, "=", vec![datum(), lit], *span);
 
     match pat {
         Pattern::Wildcard => Ok((None, vec![])),
 
-        Pattern::Variable(name) => Ok((None, vec![PatternBinding::user(name.clone(), *scrut)])),
+        Pattern::Variable(name) => Ok((None, vec![PatternBinding::new(name.clone(), *scrut)])),
 
-        // Atoms arrive as plain values in macros; use direct equality.
         Pattern::LiteralInt(n) => Ok((
             Some(equals(Syntax::new(SyntaxKind::Int(*n), *span))),
             vec![],
@@ -109,23 +115,19 @@ pub(super) fn compile_pattern(
             vec![],
         )),
 
-        Pattern::LiteralNil => {
-            // (nil? scrut)
-            Ok((Some(make_call(arena, "nil?", vec![*scrut], *span)), vec![]))
-        }
+        Pattern::LiteralNil => Ok((Some(make_call(arena, "nil?", vec![datum()], *span)), vec![])),
 
-        // Keywords arrive as plain Value::keyword in macros.
         Pattern::LiteralKeyword(k) => Ok((Some(equals(Syntax::keyword(arena, k, *span))), vec![])),
 
         Pattern::LiteralSymbol(sym_name) => {
-            // (if (syntax-symbol? scrut) (= (syntax-e scrut) 'sym) false)
-            let type_check = make_call(arena, "syntax-symbol?", vec![*scrut], *span);
+            // (if (syntax/symbol? scrut) (= (syntax/e scrut) 'sym) false)
+            let type_check = make_call(arena, "syntax/symbol?", vec![*scrut], *span);
             let quoted_sym = Syntax::quote(arena, Syntax::symbol(arena, sym_name, *span), *span);
             let eq_check = make_call(
                 arena,
                 "=",
                 vec![
-                    make_call(arena, "syntax-e", vec![*scrut], *span),
+                    make_call(arena, "syntax/e", vec![*scrut], *span),
                     quoted_sym,
                 ],
                 *span,
@@ -140,26 +142,21 @@ pub(super) fn compile_pattern(
             Ok((Some(test), vec![]))
         }
 
-        Pattern::List(sub_pats) => {
-            compile_list_pattern(arena, sub_pats, scrut, span, scope, counter)
-        }
+        Pattern::List(sub_pats) => compile_list_pattern(arena, sub_pats, scrut, span),
     }
 }
 
 /// Compile a list pattern.
 ///
-/// Returns (length_test, accessor_bindings_plus_sub_bindings).
-/// Sub-pattern tests are ANDed into the overall test using nested `if` expressions.
-/// Accessor bindings are generated via `syntax-first`/`syntax-rest` chains.
+/// The test checks the node is a list of the pattern's length, then each
+/// element's own test, in order, so an element's accessor runs only on a list
+/// long enough to hold it. Element `i` is `(get (syntax/->list scrut) i)`.
 pub(super) fn compile_list_pattern(
     arena: &SyntaxArena,
     sub_pats: &[Pattern],
     scrut: &Syntax,
     span: &Span,
-    scope: ScopeId,
-    counter: &mut GensymCounter,
 ) -> PatternResult {
-    let n = sub_pats.len();
     let and_then = |test: Syntax, next: Syntax| {
         make_if(
             arena,
@@ -169,60 +166,27 @@ pub(super) fn compile_list_pattern(
             *span,
         )
     };
+    let elements = || make_call(arena, "syntax/->list", vec![*scrut], *span);
 
-    // Primary test: (if (syntax-list? scrut) (= (length (syntax->list scrut)) N) false)
-    let type_check = make_call(arena, "syntax-list?", vec![*scrut], *span);
+    // (if (syntax/list? scrut) (= (length (syntax/->list scrut)) N) false)
+    let type_check = make_call(arena, "syntax/list?", vec![*scrut], *span);
     let len_check = make_call(
         arena,
         "=",
         vec![
-            make_call(
-                arena,
-                "length",
-                vec![make_call(arena, "syntax->list", vec![*scrut], *span)],
-                *span,
-            ),
-            Syntax::new(SyntaxKind::Int(n as i64), *span),
+            make_call(arena, "length", vec![elements()], *span),
+            Syntax::new(SyntaxKind::Int(sub_pats.len() as i64), *span),
         ],
         *span,
     );
-    let mut overall_test: Syntax = and_then(type_check, len_check);
-
-    // Generate accessor bindings.
-    // For a 3-element list (a b c), the binding sequence is:
-    //   (__sc1  (syntax-first __sc0))
-    //   (__sc2  (syntax-rest __sc0))
-    //   (__sc3  (syntax-first __sc2))
-    //   (__sc4  (syntax-rest __sc2))
-    //   (__sc5  (syntax-first __sc4))
-    // Pattern variables are bound to the element gensyms via sub-pattern bindings.
+    let mut overall_test = and_then(type_check, len_check);
     let mut all_bindings: Vec<PatternBinding> = Vec::new();
-    let mut current_tail = *scrut;
 
     for (i, sub_pat) in sub_pats.iter().enumerate() {
-        // Bind element i to a gensym.
-        let elem_name = counter.next();
-        let elem_sym = make_scoped_symbol(arena, &elem_name, *span, scope);
-        let elem_expr = make_call(arena, "syntax-first", vec![current_tail], *span);
-        all_bindings.push(PatternBinding::synthetic(elem_name, elem_expr));
-
-        // Advance the tail (for all but the last element).
-        if i + 1 < n {
-            let tail_name = counter.next();
-            let tail_sym = make_scoped_symbol(arena, &tail_name, *span, scope);
-            let tail_expr = make_call(arena, "syntax-rest", vec![current_tail], *span);
-            all_bindings.push(PatternBinding::synthetic(tail_name, tail_expr));
-            current_tail = tail_sym;
-        }
-
-        // Compile the sub-pattern with the element gensym as scrutinee.
-        let (sub_test, sub_bindings) =
-            compile_pattern(arena, sub_pat, &elem_sym, span, scope, counter)?;
-
-        // Merge sub-pattern bindings.
+        let index = Syntax::new(SyntaxKind::Int(i as i64), *span);
+        let element = make_call(arena, "get", vec![elements(), index], *span);
+        let (sub_test, sub_bindings) = compile_pattern(arena, sub_pat, &element, span)?;
         all_bindings.extend(sub_bindings);
-
-        // AND sub-pattern test into overall test.
         if let Some(st) = sub_test {
             overall_test = and_then(overall_test, st);
         }

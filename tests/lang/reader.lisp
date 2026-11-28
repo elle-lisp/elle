@@ -1,10 +1,7 @@
-(elle/epoch 12)
-## Reader Roundtrip Tests
-##
-## Migrated from tests/property/reader.rs
-## Tests the fundamental roundtrip property: read(display(read(s))) == read(s)
-## for structurally valid source code.
-
+(elle/epoch 19)
+# audited: 2026-11-24
+# read and read-all answer each literal as the value it writes, and eval of that value builds the literal's type.
+# docs/syntax.md
 
 # ============================================================================
 # Integer roundtrip
@@ -79,22 +76,22 @@
         "read nested list with pair")
 
 # ============================================================================
-# Tuple roundtrip
-# ============================================================================
-
-(assert (= (read-all "[]") (list [])) "read empty tuple")
-(assert (= (read-all "[1]") (list [1])) "read tuple with one element")
-(assert (= (read-all "[1 2 3]") (list [1 2 3])) "read tuple [1 2 3]")
-(assert (= (read-all "[-5 0 7]") (list [-5 0 7])) "read tuple [-5 0 7]")
-
-# ============================================================================
 # Array roundtrip
 # ============================================================================
 
-(assert (= (read-all "@[]") (list @[])) "read empty array")
-(assert (= (read-all "@[1]") (list @[1])) "read array with one element")
-(assert (= (read-all "@[1 2 3]") (list @[1 2 3])) "read array @[1 2 3]")
-(assert (= (read-all "@[-5 0 7]") (list @[-5 0 7])) "read array @[-5 0 7]")
+(assert (= (read-all "[]") (list [])) "read empty array")
+(assert (= (read-all "[1]") (list [1])) "read array with one element")
+(assert (= (read-all "[1 2 3]") (list [1 2 3])) "read array [1 2 3]")
+(assert (= (read-all "[-5 0 7]") (list [-5 0 7])) "read array [-5 0 7]")
+
+# ============================================================================
+# @array roundtrip
+# ============================================================================
+
+(assert (= (read-all "@[]") (list @[])) "read empty @array")
+(assert (= (read-all "@[1]") (list @[1])) "read @array with one element")
+(assert (= (read-all "@[1 2 3]") (list @[1 2 3])) "read @array @[1 2 3]")
+(assert (= (read-all "@[-5 0 7]") (list @[-5 0 7])) "read @array @[-5 0 7]")
 
 # ============================================================================
 # Quote roundtrip
@@ -108,14 +105,14 @@
 (assert (= (read-all "'foo") (list (list 'quote 'foo))) "read quoted symbol")
 (assert (= (read-all "'(+ 1 2)") (list (list 'quote (list '+ 1 2))))
         "read quoted list")
-(assert (= (read-all "'[1 2]") (list (list 'quote [1 2]))) "read quoted tuple")
+(assert (= (read-all "'[1 2]") (list (list 'quote [1 2]))) "read quoted array")
 
 # ============================================================================
 # Mixed nested structures
 # ============================================================================
 
-(assert (= (read-all "([1 2] 3)") (list (list [1 2] 3))) "read list with tuple")
-(assert (= (read-all "[@[1] 2]") (list [@[1] 2])) "read tuple with array")
+(assert (= (read-all "([1 2] 3)") (list (list [1 2] 3))) "read list with array")
+(assert (= (read-all "[@[1] 2]") (list [@[1] 2])) "read array with @array")
 (assert (= (read-all "(foo :bar 42)") (list (list 'foo :bar 42)))
         "read list with symbol, keyword, int")
 
@@ -169,12 +166,11 @@
   (assert (= (get b 3) 4) "eval of read @b[...] is mutable"))
 
 # ──────────────────────────────────────────────────────────────────────────────
-# set / @set — read desugars to call form, eval produces correct type
+# set / @set — read answers the set, eval produces correct type
 # ──────────────────────────────────────────────────────────────────────────────
 
-(assert (= (read "|1 2 3|") '(set 1 2 3)) "read |1 2 3| desugars to (set ...)")
-(assert (= (read "@|1 2 3|") '(@set 1 2 3))
-        "read @|1 2 3| desugars to (@set ...)")
+(assert (= (read "|1 2 3|") |1 2 3|) "read |1 2 3| answers the set")
+(assert (= (type-of (read "@|1 2 3|")) :@set) "read @|1 2 3| answers an @set")
 
 (let [s (eval (read "|1 2 3|"))]
   (assert (= (type-of s) :set) "eval of read |...| produces set")
@@ -186,9 +182,12 @@
   (assert (contains? s 3) "eval of read @|...| is mutable"))
 
 # ──────────────────────────────────────────────────────────────────────────────
-# struct / @struct — read desugars to call form, eval produces correct type
+# struct / @struct — read answers the struct, eval produces correct type
 # ──────────────────────────────────────────────────────────────────────────────
 
+(assert (= (read "{:a 1}") {:a 1}) "read {:a 1} answers the struct")
+(assert (= (type-of (read "@{:a 1}")) :@struct)
+        "read @{:a 1} answers an @struct")
 (assert (= (type-of (eval (read "{:a 1}"))) :struct)
         "eval of read {...} produces struct")
 

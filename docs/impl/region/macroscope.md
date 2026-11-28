@@ -1,18 +1,18 @@
 # Macro expansion — a closed allocation scope
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-24 -->
 
 What a macro expansion frees once it has copied the transformer's result, and the reference the expander gives back.
 
 A macro transformer runs at compile time and builds its expansion as a tree of
-runtime `Value`s. The quasiquote template lowers to `list`, `append` and `array`
-constructor calls (`quasiquote_to_code`), and the transformer body runs them to
-build the output. The expander then **deep-copies that result into owned
-`Syntax`** (`Syntax::from_value`). Its contract forbids any surviving arena
-pointer, and the `contains_syntax_literal` debug assert checks that. After the
-copy, the scratch the transformer built is dead: the returned tree, its interior
-nodes, and the scratch a constructor discards internally, such as an
-`append`-copied segment list.
+runtime `Value`s. The quasiquote template lowers to `list` and `array`
+constructor calls that spread each unquote-splice (`quasiquote_to_code`), and
+the transformer body runs them to build the output. The expander then
+**deep-copies that result into owned `Syntax`** (`Syntax::from_value`). Its
+contract forbids any surviving arena pointer, and the `contains_syntax_literal`
+debug assert checks that. After the copy, the scratch the transformer built is
+dead: the returned tree, its interior nodes, and the scratch a call discards
+internally, such as the argument array a spread builds.
 
 The transformer body is ordinary compiled code, so the region solver gives it
 the ordinary tail-return treatment. The result region's decref is
@@ -65,3 +65,19 @@ regions, and each answers to its own owner
 The teardown sweep forbids a force-free, because it must reclaim the whole heap
 by RC so that leaks stay visible ([rules.md](rules.md)). A closed scope is the
 inverse case: it balances its own unreleased references and nothing else.
+
+## A scope nests
+
+A transformer that runs `eval` compiles the datum, and the compile expands
+each macro the datum calls. That expansion opens a scope while the
+transformer's own scope is still open. Each open pushes a log, and a mint
+records into the innermost one. The close reclaims the innermost log, as
+above. A region the inner close leaves live joins the enclosing log, so the
+enclosing close balances it again with the rest of its scratch.
+
+The `eval` also compiles the transformer of each macro it expands, so that
+closure's region is minted inside the enclosing scope. Its one owner is the
+macro's transformer cell, a Rust structure. The cell records its reference as
+held, and the close counts a held reference as explained: it balances
+`rc − in_degree − held`. The region stays a survivor, so the edges from its
+contents still explain the regions it captures.

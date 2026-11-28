@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-28
+(elle/epoch 19)
+# audited: 2026-11-24
 # each binds every element of a collection in turn, and the collection's kind decides what an element is.
 # docs/loops.md
 

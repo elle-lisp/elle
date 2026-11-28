@@ -1,6 +1,6 @@
 # Epochs
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-24 -->
 
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
@@ -187,11 +187,11 @@ function's docstring:
                  (def greeting \"Hi\")
                  (defn hi [n] (string greeting \" \" n))
                  (fn [] {:hi hi})")
-(assert (= (map syntax->datum (compile/read-forms old-module "<doc>" :module))
-           '((fn []
-               (def greeting "Hi")
-               (defn hi [n] (string greeting " " n))
-               {:hi hi})))
+(assert (= (map syntax/->datum (compile/read-forms old-module "<doc>" :module))
+           (read-all "(fn []
+                        (def greeting \"Hi\")
+                        (defn hi [n] (string greeting \" \" n))
+                        {:hi hi})"))
         "the forms before the function move into its body")
 ```
 

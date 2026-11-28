@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! One `def` or `var` site: each name it binds is a new binding, visible from the site to the end of its body.
 //!
 //! docs/bindings.md
@@ -76,6 +76,9 @@ impl<'a> Analyzer<'a> {
             let inner = self.arena.get_mut(binding);
             inner.is_immutable = !mutable;
             inner.is_prebound = prebound;
+            if !pattern {
+                inner.site = Some(target.span);
+            }
             fresh.push((name, scopes, binding));
         }
 

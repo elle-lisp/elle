@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! What the analyzer marks as the source's own: the bindings it spells, the nodes built for its symbols, and one error per place.
 //!
 //! src/hir/analyze/overview.md
@@ -20,10 +20,10 @@ fn marks(result: &crate::pipeline::AnalyzeResult, name: &str) -> Vec<bool> {
 
 #[test]
 fn the_bindings_each_introduces_are_marked_and_the_users_are_not() {
-    // The counter-factual marked nothing, so `seq`, `cur` and `len` reached the
+    // The counter-factual marked nothing, so `seq`, `at` and `broke` reached the
     // symbol list and the lint rules as names the user wrote.
     let result = analyze_file("(defn f [xs] (each x in xs x))");
-    for name in ["seq", "cur", "idx", "len", "broke", "items"] {
+    for name in ["seq", "given", "at", "broke"] {
         let marks = marks(&result, name);
         assert!(
             !marks.is_empty() && marks.iter().all(|m| *m),
@@ -40,13 +40,13 @@ fn the_bindings_each_introduces_are_marked_and_the_users_are_not() {
 }
 
 #[test]
-fn a_name_datum_to_syntax_places_at_the_call_site_is_the_users() {
-    // `datum->syntax` gives `it` the scopes of the caller's `test`, which carry
+fn a_name_from_datum_places_at_the_call_site_is_the_users() {
+    // `syntax/<-datum` gives `it` the scopes of the caller's `test`, which carry
     // no intro scope. A mark read off the template would hide a name the caller
     // writes in the body.
     let result = analyze_file(
         "(defmacro aif (test then else)
-           `(let [,(datum->syntax test 'it) ,test] (if ,test ,then ,else)))
+           `(let [,(syntax/<-datum test 'it) ,test] (if ,test ,then ,else)))
          (defn f [a] (aif a it 0))",
     );
     let marks = marks(&result, "it");

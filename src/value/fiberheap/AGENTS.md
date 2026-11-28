@@ -35,7 +35,7 @@ names its heap and region explicitly through `arena`.
 | File | Purpose |
 |------|---------|
 | [mod.rs](mod.rs) | `FiberHeap` struct, custom-allocator state, and the `needs_drop()` / `holds_value_refs()` re-export |
-| [region.rs](region.rs) | The `FiberHeap` region-allocator surface: every method that allocates into, reference-counts, adopts, or inspects the per-heap `RegionStore` |
+| [region.rs](region.rs) | The `FiberHeap` region-allocator surface: every method that allocates into, reference-counts, adopts, or inspects the per-heap `RegionStore`, except the mint scope's |
 | [custom.rs](custom.rs) | The `with-allocator` stack and heap teardown: raw allocations, their destructors, and the loop `clear`/`Drop` share |
 | [dropsafety.rs](dropsafety.rs) | The two exhaustive per-tag predicates region teardown drives: which variants own inner allocations needing `Drop`, and which hold `Value` references needing cascade decref |
 | [regionstore.rs](regionstore.rs) | `RegionStore` + the `Reclaim` typestate (`Counted` xor `Owned`): id mint/recycle, per-id generations, the interval table, and the submodules below |
@@ -46,7 +46,7 @@ names its heap and region explicitly through `arena`.
 | [regionstore/introspect.rs](regionstore/introspect.rs) | Read-only counts, byte totals, cross-ref and edge dumps behind the `arena/*` diagnostics and the free-time equivalence oracle |
 | [regionstore/free.rs](regionstore/free.rs) | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
 | [regionstore/free/rescue.rs](regionstore/free/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
-| [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
+| [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree − held` (an `Owned` survivor is left to its owner's drop), and the `FiberHeap` methods over them |
 | [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, sizes, adopts, rescues, extracts, reparents and owned gauges, and their process totals under `--dump=stats`; the traffic counters behind `arena/increfs` and `arena/decrefs` |
 | [regionstore/hydrate.rs](regionstore/hydrate.rs) | Install a hydrated image region: adopt the mapped pages as one interval, enter the region in the interval table, and rebuild object bookkeeping from the image's index ([hydration.md](../../../docs/impl/image/hydration.md)) |
 | [regionpool.rs](regionpool.rs) | `RegionPool`: dual-ended pages, object and data cursors, page claim and release, and a hydrated region's interval |

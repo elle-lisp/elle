@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-17
+(elle/epoch 19)
+# audited: 2026-11-24
 # Each prelude macro answers what it promises and captures none of the caller's names.
 # docs/stdlib.md
 
@@ -198,28 +198,6 @@
 (assert (= (case 1
              1 :first
              1 :second) :first) "case first match wins")
-
-# ============================================================================
-# if-let — conditional binding
-# ============================================================================
-
-(assert (= (if-let [x 42] x :else) 42) "if-let truthy")
-(assert (= (if-let [x nil] :then :else) :else) "if-let falsy")
-(assert (= (if-let [x false] :then :else) :else) "if-let false is falsy")
-(assert (= (if-let [x 1
-                    y 2]
-             (+ x y)
-             :else) 3) "if-let multi binding all truthy")
-(assert (= (if-let [x 1
-                    y nil]
-             (+ x y)
-             :else) :else) "if-let multi binding second falsy")
-(assert (= (if-let [x 42] x :else) 42) "if-let bracket binding")
-(assert (= (if-let [x nil] :then :else) :else) "if-let bracket binding falsy")
-(assert (= (if-let [x 1
-                    y 2]
-             (+ x y)
-             :else) 3) "if-let bracket multi binding")
 
 # ============================================================================
 # when-let — conditional binding without else

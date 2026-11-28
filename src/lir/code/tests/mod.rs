@@ -170,6 +170,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
         Op::IsStructMut => dst_src!(IsStructMut),
         Op::IsSet => dst_src!(IsSet),
         Op::IsSetMut => dst_src!(IsSetMut),
+        Op::SyntaxView => dst_src!(SyntaxView),
         Op::ArrayMutLen => dst_src!(ArrayMutLen),
         Op::MakeCaptureCell => I::MakeCaptureCell {
             dst: r(1),
@@ -208,6 +209,11 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             dst: r(1),
             src: r(2),
             key: ConstRef::Keyword(0x5eed),
+        },
+        Op::StructHasKey => I::StructHasKey {
+            dst: r(1),
+            src: r(2),
+            key: ConstRef::Keyword(0xface),
         },
         Op::StructGetDestructure => I::StructGetDestructure {
             dst: r(1),

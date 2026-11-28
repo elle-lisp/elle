@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! The entry points that analyze one form or a whole file to HIR, for the linter, the LSP and compile/analyze.
 //!
 //! docs/pipeline.md
@@ -43,6 +43,7 @@ fn analyze_in_arena(
     let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     let expanded = expander.expand(syntax, symbols, vm)?;
+    let expansion = expander.take_findings();
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new_with_primitives(
         symbols,
@@ -69,6 +70,7 @@ fn analyze_in_arena(
         top_direct,
         fixed,
         written,
+        expansion,
     })
 }
 
@@ -116,6 +118,7 @@ fn analyze_file_in_arena(
 
     // Expand all forms, splicing each include where it stands.
     let expanded_forms = expander.expand_forms(syntaxes, symbols, vm)?;
+    let expansion = expander.take_findings();
 
     // Classify each form
     let forms = expanded_forms.iter().map(classify_form).collect();
@@ -156,5 +159,6 @@ fn analyze_file_in_arena(
         top_direct,
         fixed,
         written,
+        expansion,
     })
 }

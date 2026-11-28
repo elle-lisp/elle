@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-24
 //! Syntax tree representation for Elle source code
 //!
 //! docs/impl/syntax.md
@@ -27,6 +27,7 @@ mod kind;
 mod node;
 mod span;
 mod unit;
+mod view;
 
 pub use arena::{thread_arena, SyntaxArena, SyntaxHeap};
 pub use expand::{Expander, MacroDef, MacroParams};
@@ -119,7 +120,7 @@ thread_local! {
     /// transformer, if any. Set (and restored) by `expand_macro_call_inner`
     /// around the transformer call; read by `prim_datum_to_syntax` to strip
     /// the pre-stamped intro scope from copied context scopes, so
-    /// datum->syntax results carry the context's true use-site scope set.
+    /// syntax/<-datum results carry the context's true use-site scope set.
     static CURRENT_MACRO_INTRO: std::cell::Cell<Option<ScopeId>> =
         const { std::cell::Cell::new(None) };
 }

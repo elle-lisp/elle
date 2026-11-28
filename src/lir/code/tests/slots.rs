@@ -1,4 +1,4 @@
-// audited: 2026-11-27
+// audited: 2026-11-28
 //! The local slots each instruction names, written out by hand as the oracle `InstrRef::slot_refs` is checked against.
 //!
 //! src/lir/overview.md
@@ -69,11 +69,13 @@ fn expected_slots(i: &InstrRef<'_>) -> Vec<SlotRef> {
         | I::LoadCaptureCell { .. }
         | I::StoreCaptureCell { .. }
         | I::MatchFail { .. }
+        | I::SyntaxView { .. }
         | I::FirstDestructure { .. }
         | I::RestDestructure { .. }
         | I::ArrayMutRefDestructure { .. }
         | I::ArraySliceFrom { .. }
         | I::ArrayMutSliceFrom { .. }
+        | I::StructHasKey { .. }
         | I::StructGetOrNil { .. }
         | I::StructGetDestructure { .. }
         | I::StructRest { .. }

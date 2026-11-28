@@ -50,6 +50,25 @@ Children are stored **by value, inline** in one slice, not as a slice of
 pointers. A list of *n* elements is one allocation of *n* nodes; walking it
 touches contiguous bytes.
 
+### One node per quoting form
+
+A tree holds a quoting form as a node, never as a list. A list of two
+elements whose head is the symbol `quote`, `quasiquote`, `unquote` or
+`unquote-splicing` builds a `Quote`, `Quasiquote`, `Unquote` or
+`UnquoteSplicing` node instead. [The reader](reader.md), `Syntax::from_value`
+and `syntax/rebuild` all build a list through that one rule, so a tree from
+text, from a value or from a transformer's walk holds the node, and no
+consumer checks for the list. `to_value` writes the node as the list again,
+because a value has no node.
+
+The node's span covers the list the text wrote, and the formatter prints a
+node in the spelling its source text holds.
+
+A quasiquote lowers each template symbol to a `SyntaxLiteral`, which keeps its
+scopes, only while the expander compiles a transformer or a `begin-for-syntax`
+body. Everywhere else it quotes the symbol, because the value it builds is
+data ([macros.md](../macros.md)).
+
 ### Why a name and not a hash
 
 A symbol node carries its spelling as a region string, not a `SymbolId`.
@@ -103,6 +122,10 @@ This is the rule `RegionSlice`'s module docs state for every slice-backed
 clone — copy the payload into the clone's own region — applied to syntax.
 Every builder of a syntax object obeys it: `value::build::syntax`,
 `with-traits`, and `ConstTemplate::SyntaxSymbol`'s materializer.
+`value::build::syntax_resident` builds no copy, because its node is a child of
+a syntax object that the same region already holds. The object is
+self-contained all the same. `match` reads a syntax object through such a view
+(`Syntax::view`), which wraps each child with no copy.
 `Syntax::from_value` copies the other way, out of the value's region into the
 working arena, which is why a macro transformer's entire output survives the
 reclaim of its allocation scope.
@@ -119,6 +142,11 @@ new one:
 - `stamp_scope` adds a scope to every non-exempt node.
 - `flip_scope_recursive` flips one scope on every non-exempt node — the
   hygiene operation applied to a transformer's result.
+
+Neither enters a quote at template level zero, because its contents are data.
+Inside a quasiquote a quote is part of the template, and a hole inside it is
+code that must resolve, so both walks enter it there. Each quasiquote raises
+the walk's level by one, and each unquote lowers it by one.
 
 Both copy: a shared subtree must not see a scope its other holders did not ask
 for. [measurements.md](image/measurements.md) item 5 measures the copy at

@@ -1,6 +1,6 @@
 # Loops
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-25 -->
 
 Elle's loop forms are `while`, `forever`, `repeat`, and `each`. All
 support early exit via `break`. See [control.md](control.md) for the
@@ -79,12 +79,29 @@ The collection decides what an element is:
 [structs.md](structs.md) holds the key order, and [traits.md](traits.md)
 the `:iter` protocol.
 
+`each` reads the length of an indexed collection once, before the first pass,
+then visits the positions from the first up to that length. So an element the
+body pushes onto an `@array` is not visited, and every element that was there
+is visited in order.
+
+```lisp
+(def queue @[1 2 3])
+(def seen @[])
+(each x in queue
+  (when (= x 1) (push queue 9))
+  (push seen x))
+(assert (= (freeze seen) [1 2 3]))
+```
+
+`each` places its body once, whatever the collection, so a nested `each` adds
+the same amount of code at each level ([types.md](macros/types.md)).
+
 `each` resumes a fiber once per pass. Every value the fiber yields is an
 element, `nil` and `false` included. The loop ends when the fiber completes.
 The value the fiber returns is not an element; it is the value of the `each`.
 An error inside the fiber
 propagates out of `each`, also when the fiber's mask catches errors. A fiber
-that has already completed raises, as `fiber/resume` does.
+that has already completed signals an error, as `fiber/resume` does.
 
 ```lisp
 (def gen (fiber/new (fn [] (yield 1) (yield nil) (yield false) :done)
@@ -94,7 +111,7 @@ that has already completed raises, as `fiber/resume` does.
 (assert (= (freeze yielded) [1 nil false]))
 ```
 
-Any other value raises a `:type-error`, and `nil` is no exception.
+Any other value signals a `:type-error`, and `nil` is no exception.
 
 ```lisp
 (let [[ok? err] (protect (each x nil x))]

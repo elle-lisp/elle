@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 // The sources and the documents the audit queue lists, which the size producer reads.
 //
 // docs/impl/audit.md
@@ -87,13 +87,14 @@ fn sources_lists_every_queued_file_that_is_not_a_document() {
 #[test]
 fn sources_leaves_out_what_the_queue_exempts() {
     // The counter-factual: a second copy of the exemptions drifts from the
-    // queue's, and a vendored table or the standard library lands on the size
-    // ledger as a debt no remedy can pay.
+    // queue's, and a vendored table, the standard library or the prelude lands
+    // on the size ledger as a debt no remedy can pay.
     let t = ScratchDir::new("audit-sources-exempt");
     write_fixture(t.path(), "ours.rs", "fn f() {}\n");
     write_fixture(t.path(), "vendor/LICENSE-MIT", "MIT\n");
     write_fixture(t.path(), "vendor/tables.rs", "const T: [u8; 1] = [0];\n");
     write_fixture(t.path(), "src/stdlib.lisp", "(def x 1)\n");
+    write_fixture(t.path(), "src/prelude.lisp", "(defmacro m [] nil)\n");
     write_fixture(t.path(), "src/lir/code/instr.rs", "enum InstrRef {}\n");
     write_fixture(t.path(), "Makefile", "all:\n");
     write_fixture(t.path(), "plugins/p.rs", "fn p() {}\n");

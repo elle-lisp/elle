@@ -1,15 +1,14 @@
 // audited: 2026-11-25
-//! Conversion between Syntax and Value: read-time data and quoted templates out, macro results back in.
+//! Conversion between Syntax and Value: source as data, a quote's constant, and macro results read back as syntax.
 //!
+//! docs/syntax.md
 //! docs/impl/syntax.md
 //! docs/impl/region/model.md
 //!
-//! `tests/lang/syntax-roundtrip.lisp` pins the round trip.
-//!
-//! These conversions are needed for:
-//! - Read-time data: `read`, `read-all` and `syntax->datum` (Syntax → Value)
-//! - A quoted datum, built fresh each execution (Syntax → ConstTemplate)
-//! - Macro results that return runtime Values (Value → Syntax)
+//! `tests/lang/datum.lisp` and `tests/lang/syntax-roundtrip.lisp` pin the
+//! round trip.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Span, Syntax, SyntaxArena, SyntaxKind};
 use crate::primitives::ctx::NativeCtx;
@@ -84,151 +83,169 @@ fn table_key_to_syntax(
                 .collect();
             return Ok(Syntax::array(arena, &elements?, *span));
         }
-        TableKey::Heap(_) => {
-            return Err("Cannot convert heap key to Syntax".to_string());
-        }
+        // A list, set, struct or bytes key: the value it holds, which a
+        // struct literal may write as a key.
+        TableKey::Heap(v) => return Syntax::from_value(arena, v, symbols, *span),
     };
     Ok(Syntax::new(kind, *span))
 }
 
+/// The values `items` convert to, each through `Syntax::to_value_in`.
+fn values_of(
+    items: &[Syntax],
+    symbols: &mut SymbolTable,
+    ctx: &mut NativeCtx,
+) -> Result<Vec<Value>, String> {
+    items
+        .iter()
+        .map(|item| item.to_value_in(symbols, ctx))
+        .collect()
+}
+
+/// A quoting form or a bytes literal as data: the list `(name items…)`.
+fn call_of(
+    name: &str,
+    items: &[Syntax],
+    symbols: &mut SymbolTable,
+    ctx: &mut NativeCtx,
+) -> Result<Value, String> {
+    let mut values = vec![Value::symbol(symbols.intern(name))];
+    values.extend(values_of(items, symbols, ctx)?);
+    Ok(ctx.list(values))
+}
+
+/// The entries a struct literal's children write, keys and values taking
+/// turns. A repeated key keeps its last value, as the running struct does.
+fn struct_entries(
+    items: &[Syntax],
+    symbols: &mut SymbolTable,
+    ctx: &mut NativeCtx,
+) -> Result<BTreeMap<TableKey, Value>, String> {
+    if !items.len().is_multiple_of(2) {
+        return Err(format!(
+            "a struct literal holds {} forms, which is no set of key-value pairs",
+            items.len()
+        ));
+    }
+    let mut entries = BTreeMap::new();
+    for pair in items.chunks(2) {
+        let key = pair[0].to_value_in(symbols, ctx)?;
+        let key = TableKey::from_value(&key).ok_or_else(|| {
+            format!(
+                "a struct key must be an immutable value other than a float, got {}",
+                key.type_name()
+            )
+        })?;
+        entries.insert(key, pair[1].to_value_in(symbols, ctx)?);
+    }
+    Ok(entries)
+}
+
+/// The members a set literal's children write, each frozen as `set` freezes
+/// it. A repeated member is one member.
+fn set_members(
+    items: &[Syntax],
+    symbols: &mut SymbolTable,
+    ctx: &mut NativeCtx,
+) -> Result<BTreeSet<Value>, String> {
+    let mut members = BTreeSet::new();
+    for item in items {
+        let member = item.to_value_in(symbols, ctx)?;
+        members.insert(crate::primitives::sets::freeze_value(member, ctx));
+    }
+    Ok(members)
+}
+
 impl Syntax {
-    /// Convert Syntax to a runtime Value as an **ordinary allocation** into the
-    /// ctx's own region (reclaimed by RC). Used by the read-time primitives `read`
-    /// / `read-all` / `syntax->datum`, whose native call mints a fresh region for
-    /// the result (docs/impl/region/model.md).
+    /// Convert Syntax to the data `read`, `read-all` and `syntax/->datum`
+    /// answer, as an ordinary allocation into the ctx's own region
+    /// (docs/syntax.md, docs/impl/region/model.md).
     ///
-    /// `ctx` is the allocation capability — the read-time primitives pass their
-    /// call's ctx (docs/impl/region/ctx.md). The whole tree lands in the ctx's
-    /// region, reclaimed at the caller's `decref_point`.
-    pub fn to_value(&self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Value {
+    /// A literal answers the value it writes, a struct or set included. A
+    /// bytes literal answers a call of `bytes`, because its elements are
+    /// expressions. A struct key that no struct holds is the error.
+    ///
+    /// `ctx` is the allocation capability (docs/impl/region/ctx.md). The whole
+    /// tree lands in the ctx's region, reclaimed at the caller's
+    /// `decref_point`.
+    pub fn to_value(
+        &self,
+        symbols: &mut SymbolTable,
+        ctx: &mut NativeCtx,
+    ) -> Result<Value, String> {
         self.to_value_in(symbols, ctx)
     }
 
-    /// Shared recursive materializer threading the `ctx` capability through every
-    /// heap leaf. Immediates (nil/bool/int/float/symbol/keyword) need no region;
-    /// every heap leaf (`String`, the list spine, `Array`, the `Rc`-backed mutable
-    /// aggregates, syntax) is born in the ctx's region via the `ctx.*`
-    /// constructors.
-    fn to_value_in(self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Value {
-        match &self.kind {
+    /// The recursive half of [`to_value`](Self::to_value). Immediates need no
+    /// region, and every heap leaf is born in the ctx's region.
+    fn to_value_in(self, symbols: &mut SymbolTable, ctx: &mut NativeCtx) -> Result<Value, String> {
+        Ok(match &self.kind {
             SyntaxKind::Nil => Value::NIL,
             SyntaxKind::Bool(b) => Value::bool(*b),
             SyntaxKind::Int(n) => Value::int(*n),
             SyntaxKind::Float(n) => Value::float(*n),
-            SyntaxKind::Symbol(s) => {
-                let id = symbols.intern(s);
-                Value::symbol(id)
-            }
+            SyntaxKind::Symbol(s) => Value::symbol(symbols.intern(s)),
             SyntaxKind::Keyword(s) => {
-                // A learning site: read-time keyword data (`read`, `read-all`,
-                // `syntax->datum`) records its spelling like the analyzer does
-                // for compiled source.
+                // A learning site: read-time keyword data records its spelling
+                // as the analyzer does for compiled source.
                 symbols.keyword(s);
                 Value::keyword(s)
             }
             SyntaxKind::String(s) => ctx.string(s),
             SyntaxKind::StringMut(s) => ctx.string_mut(s.as_bytes().to_vec()),
             SyntaxKind::List(items) => {
-                let values: Vec<Value> = items
-                    .iter()
-                    .map(|item| item.to_value_in(symbols, ctx))
-                    .collect();
+                let values = values_of(items, symbols, ctx)?;
                 ctx.list(values)
             }
             SyntaxKind::Array(items) => {
-                let values: Vec<Value> = items
-                    .iter()
-                    .map(|item| item.to_value_in(symbols, ctx))
-                    .collect();
+                let values = values_of(items, symbols, ctx)?;
                 ctx.array(values)
             }
             SyntaxKind::ArrayMut(items) => {
-                let values: Vec<Value> = items
-                    .iter()
-                    .map(|item| item.to_value_in(symbols, ctx))
-                    .collect();
+                let values = values_of(items, symbols, ctx)?;
                 ctx.array_mut(values)
             }
-            SyntaxKind::Bytes(items) => {
-                // Convert to (bytes e1 e2 ...) list
-                let bytes_sym = symbols.intern("bytes");
-                let mut values = vec![Value::symbol(bytes_sym)];
-                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
-                ctx.list(values)
-            }
-            SyntaxKind::BytesMut(items) => {
-                // Convert to (@bytes e1 e2 ...) list
-                let bytes_mut_sym = symbols.intern("@bytes");
-                let mut values = vec![Value::symbol(bytes_mut_sym)];
-                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
-                ctx.list(values)
-            }
             SyntaxKind::Struct(items) => {
-                // Convert to (struct k1 v1 k2 v2 ...) list
-                let struct_sym = symbols.intern("struct");
-                let mut values = vec![Value::symbol(struct_sym)];
-                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
-                ctx.list(values)
+                let entries = struct_entries(items, symbols, ctx)?;
+                ctx.struct_from(entries)
             }
             SyntaxKind::StructMut(items) => {
-                // Convert to (@struct k1 v1 k2 v2 ...) list
-                let struct_mut_sym = symbols.intern("@struct");
-                let mut values = vec![Value::symbol(struct_mut_sym)];
-                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
-                ctx.list(values)
+                let entries = struct_entries(items, symbols, ctx)?;
+                ctx.struct_mut_from(entries)
             }
             SyntaxKind::Set(items) => {
-                // Convert to (set e1 e2 ...) list
-                let set_sym = symbols.intern("set");
-                let mut values = vec![Value::symbol(set_sym)];
-                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
-                ctx.list(values)
+                let members = set_members(items, symbols, ctx)?;
+                ctx.set(members)
             }
             SyntaxKind::SetMut(items) => {
-                // Convert to (@set e1 e2 ...) list
-                let set_mut_sym = symbols.intern("@set");
-                let mut values = vec![Value::symbol(set_mut_sym)];
-                values.extend(items.iter().map(|item| item.to_value_in(symbols, ctx)));
-                ctx.list(values)
+                let members = set_members(items, symbols, ctx)?;
+                ctx.set_mut(members)
             }
-            SyntaxKind::Quote(inner) => {
-                let quote_sym = symbols.intern("quote");
-                let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(quote_sym), inner_val])
-            }
+            SyntaxKind::Bytes(items) => return call_of("bytes", items, symbols, ctx),
+            SyntaxKind::BytesMut(items) => return call_of("@bytes", items, symbols, ctx),
+            SyntaxKind::Quote(inner) => return call_of("quote", &[**inner], symbols, ctx),
             SyntaxKind::Quasiquote(inner) => {
-                let sym = symbols.intern("quasiquote");
-                let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym), inner_val])
+                return call_of("quasiquote", &[**inner], symbols, ctx)
             }
-            SyntaxKind::Unquote(inner) => {
-                let sym = symbols.intern("unquote");
-                let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym), inner_val])
-            }
+            SyntaxKind::Unquote(inner) => return call_of("unquote", &[**inner], symbols, ctx),
             SyntaxKind::UnquoteSplicing(inner) => {
-                let sym = symbols.intern("unquote-splicing");
-                let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym), inner_val])
+                return call_of("unquote-splicing", &[**inner], symbols, ctx)
             }
-            SyntaxKind::Splice(inner) => {
-                let sym = symbols.intern("splice");
-                let inner_val = inner.to_value_in(symbols, ctx);
-                ctx.list(vec![Value::symbol(sym), inner_val])
-            }
+            SyntaxKind::Splice(inner) => return call_of("splice", &[**inner], symbols, ctx),
             // A hygiene-bearing template symbol. Materialize a fresh syntax object
             // (ordinary allocation into the ctx's region) wrapping the carried
             // `Syntax` — processed by from_value() after VM evaluation.
             SyntaxKind::SyntaxLiteral(s) => ctx.syntax(**s),
-        }
+        })
     }
 
     /// Convert Syntax to a `ConstTemplate` — the allocation-free compile-time
-    /// form of [`to_value`](Self::to_value): plain recursive data that
+    /// form of a quoted datum: plain recursive data that
     /// `MaterializeConst` materializes fresh into a reclaimable region each
     /// execution (docs/impl/region/model.md).
-    /// The desugaring matches `to_value` — a quoted `{:a 1}` becomes the list
-    /// template `(struct :a 1)`, etc. — so the quoted datum's value is unchanged.
+    /// A quote differs from [`to_value`](Self::to_value) at a struct, set or
+    /// bytes literal, which it writes as a call: a quoted `{:a 1}` becomes the
+    /// list template `(struct :a 1)` (docs/syntax.md).
     ///
     /// A hygiene-bearing `SyntaxLiteral` (always a symbol) becomes a
     /// `ConstTemplate::SyntaxSymbol` carrying its scope set verbatim, so it too
@@ -333,7 +350,7 @@ impl Syntax {
         // arriving intact. Argument-origin nodes carry their use-site scopes
         // plus the pre-stamped intro scope, which the flip removes.
         // Template-origin nodes carry definition-site scopes only, and the flip
-        // adds the intro scope. Nodes from `datum->syntax` carry their own
+        // adds the intro scope. Nodes from `syntax/<-datum` carry their own
         // scope_exempt flag and dodge the flip — do NOT blanket-exempt here:
         // blanket-exempting disables hygiene entirely by shielding every
         // identifier from the intro scope.
@@ -381,7 +398,7 @@ impl Syntax {
                 .iter()
                 .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
-            SyntaxKind::List(arena.nodes(&syntaxes?))
+            SyntaxKind::list(arena.nodes(&syntaxes?))
         } else if let Some(elems) = value.as_array() {
             let syntaxes: Result<Vec<Syntax>, String> = elems
                 .iter()

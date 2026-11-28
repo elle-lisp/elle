@@ -1,6 +1,6 @@
 # Modules: macros as values
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 The plan for a macro as a value a module exports, and for how a consumer hands it to the compile that uses it.
 
@@ -8,29 +8,23 @@ The plan for a macro as a value a module exports, and for how a consumer hands i
 [shape.md](shape.md) states what a load is, and [macros.md](../macros.md)
 states how a macro expands today. None of this document is built yet. It says
 what changes so that a module may export a macro, and why the change has this
-shape.
+shape. [The macro design](../macros/overview.md) states what a macro becomes
+inside one unit.
 
 ## A macro is a value
 
-A macro is a value of its own type: `type-of` answers `:macro`, and `macro?`
-answers true for it. It holds what a definition holds today: the parameter
-lists, the template, and the compiled transformer, or nil until the first
-expansion compiles it. The boot image already carries each prelude macro in
-that shape ([boot.md](../impl/image/boot.md)).
-
-`(defmacro name params body)` makes the value, registers it for the rest of
-the unit, and binds `name` to it where a `def` would bind. So a module's struct
-exports a macro as it exports a function, and a `defmacro` inside a `fn` body
-binds a local as `defn` does. A macro and a closure are distinct types, so a
-call site cannot take one for the other.
+[binding.md](../macros/binding.md) states what a macro value is, and when a
+name that holds one heads a macro call. A module's struct therefore exports a
+macro as it exports a function. The boot image already carries each prelude
+macro as the parts that value holds ([boot.md](../impl/image/boot.md)).
 
 ## A compile takes macros as values
 
-`eval` takes an env struct whose symbol-keyed entries bind as names. An entry
-whose value is a macro binds that name as a macro for the unit instead, beside
-the prelude's macros and the unit's own. `import/load-syntax`,
-`import/load-source` and `import/load-file` take the same env, and a loader of
-the user's own passes whatever it chooses.
+`eval` takes an env struct whose symbol-keyed entries bind as names. Each
+entry is static to the compile, so an entry that holds a macro heads a macro
+call, and an entry that holds a module's struct heads one as `m:name`.
+`import/load-syntax`, `import/load-source` and `import/load-file` take the
+same env, and a loader of the user's own passes whatever it chooses.
 
 The consumer therefore composes the two steps. It imports the module that
 holds the macros, then compiles the unit that uses them with the env:
@@ -58,21 +52,22 @@ value. `Syntax::from_value` makes one for a value that has no syntax form, the
 analyzer lowers it to a constant that loads that value itself, and an image
 dumps it as it dumps any constant. A template therefore reaches its module's
 helpers by value: `,helper` in a quasiquote puts the helper's closure in the
-expansion, and no name has to resolve in the using unit. `defmacro` binds its
-name through the same node.
+expansion, and no name has to resolve in the using unit. A run-time read of a
+static binding loads its value through the same node.
 
 The value is shared, not rebuilt. The node holds the one value the transformer
-closed over, as a captured binding holds one value, so a mutable value embedded
-this way is shared by every expansion. The node records an edge to the value's
-region, as a struct that holds the value would.
+closed over, as a captured binding holds one value. That value is sealed
+([static.md](../macros/static.md)), so no expansion shares mutable state
+through the node. The node records an edge to the value's region, as a struct
+that holds the value would.
 
 ## Rejected alternatives
 
 **A compile-time import.** [shape.md](shape.md) rejects it.
 
-**A macro namespace at the head of a form.** `(m:when c body)` with `m` an
-imported module. The expander knows no `m` while it expands, because `m` is a
-binding a run fills.
+**A macro namespace that a run fills.** `(m:when c body)` with `m` bound by an
+import in the same unit. The compile holds no value for `m`, because a run
+fills that binding. The same head works when `m` is an entry of the env.
 
 **A declaration of macro imports in the file.** A header the loader reads
 before it compiles would be syntax that only the default loader honors, and a

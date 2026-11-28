@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! Emitting the intrinsic opcodes: type predicates, data access, mutability,
 //! identity, and the signal bound check.
 //!
@@ -13,86 +13,23 @@ impl Emitter {
     pub(super) fn emit_instr_intrinsics(&mut self, instr: &InstrRef<'_>) {
         match instr {
             // === Type predicates ===
-            InstrRef::IsEmpty { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsEmptyList);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsBool { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBool);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsInt { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsInt);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsFloat { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsFloat);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsString { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsString);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsKeyword { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsKeyword);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::IsEmpty { dst, src } => self.emit_unary(*dst, *src, Instruction::IsEmptyList),
+            InstrRef::IsBool { dst, src } => self.emit_unary(*dst, *src, Instruction::IsBool),
+            InstrRef::IsInt { dst, src } => self.emit_unary(*dst, *src, Instruction::IsInt),
+            InstrRef::IsFloat { dst, src } => self.emit_unary(*dst, *src, Instruction::IsFloat),
+            InstrRef::IsString { dst, src } => self.emit_unary(*dst, *src, Instruction::IsString),
+            InstrRef::IsKeyword { dst, src } => self.emit_unary(*dst, *src, Instruction::IsKeyword),
             InstrRef::IsSymbolCheck { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsSymbol);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_unary(*dst, *src, Instruction::IsSymbol)
             }
-            InstrRef::IsBytes { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBytes);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsBox { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsBox);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsClosure { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsClosure);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::IsFiber { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsFiber);
-                self.pop();
-                self.push_reg(*dst);
-            }
-            InstrRef::TypeOf { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::TypeOf);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::IsBytes { dst, src } => self.emit_unary(*dst, *src, Instruction::IsBytes),
+            InstrRef::IsBox { dst, src } => self.emit_unary(*dst, *src, Instruction::IsBox),
+            InstrRef::IsClosure { dst, src } => self.emit_unary(*dst, *src, Instruction::IsClosure),
+            InstrRef::IsFiber { dst, src } => self.emit_unary(*dst, *src, Instruction::IsFiber),
+            InstrRef::TypeOf { dst, src } => self.emit_unary(*dst, *src, Instruction::TypeOf),
 
             // === Data access ===
-            InstrRef::Length { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::Length);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::Length { dst, src } => self.emit_unary(*dst, *src, Instruction::Length),
             InstrRef::Get { dst, obj, key } => {
                 self.ensure_binary_on_top(*obj, *key);
                 self.bytecode.emit(Instruction::IntrGet);
@@ -145,12 +82,7 @@ impl Emitter {
                 self.pop(); // bytes
                 self.push_reg(*dst);
             }
-            InstrRef::Pop { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IntrPop);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::Pop { dst, src } => self.emit_unary(*dst, *src, Instruction::IntrPop),
 
             // === Mutability ===
             InstrRef::Freeze { dst, src, region } => {

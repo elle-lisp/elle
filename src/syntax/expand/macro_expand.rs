@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
@@ -14,12 +14,8 @@
 //! fiber the expansion runs on, and a fault in it fails the compile naming the
 //! macro.
 //!
-//! Scope preservation: atom arguments (nil, bool, int, float, string, keyword)
-//! are passed as their direct `Value` equivalents. They do not take part in
-//! binding resolution, and wrapping them as syntax objects would change their
-//! runtime semantics: `false` wrapped in a syntax object, for example, becomes
-//! truthy. Symbols and compound forms are wrapped as `Value::syntax(arg)` to
-//! preserve scope sets through the closure call.
+//! Every argument, an atom included, crosses the closure call as a syntax
+//! object, so its span and scope set survive it (docs/macros/syntax.md).
 //!
 //! Hygiene (Flatt 2016, sets of scopes): each expansion mints a fresh intro
 //! scope, and PRE-STAMPS it on the wrapped arguments. After the transformer
@@ -28,7 +24,7 @@
 //! scope, gain it. Argument-origin identifiers lose it, which recovers their
 //! use-site scope sets exactly. A template binder therefore carries the intro
 //! scope while inbound identifiers do not, so under the subset resolution rule
-//! the binder cannot capture them (tests/lang/hygiene.lisp). `datum->syntax`
+//! the binder cannot capture them (tests/lang/hygiene.lisp). `syntax/<-datum`
 //! (scope_exempt) opts a node out of both operations — the deliberate-capture
 //! escape hatch.
 //!
@@ -42,8 +38,8 @@
 //! expander gives back the reference the call handed over with it. The scope
 //! is then reclaimed by balancing each survivor's unexplained references. The
 //! scope also owns the transient region the argument wrapping below allocates
-//! into, so its physical id goes back to the free list whether or not anything
-//! was wrapped into it. Together those keep the per-invocation cost of an
+//! into, so its physical id goes back to the free list even when a call with
+//! no arguments wrapped nothing into it. Together those keep the per-invocation cost of an
 //! expansion constant in every dimension: objects, regions, bytes, and physical
 //! ids.
 //!
@@ -51,50 +47,12 @@
 //! - Macros cannot return improper lists (for example, `(pair 1 2)`). The
 //!   `from_value()` conversion requires proper lists.
 
-use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
+use super::{Expander, MacroDef, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Syntax, UnitTag};
 use crate::value::Value;
 use crate::vm::expansion::CompileTimeFault;
 use crate::vm::VM;
-
-/// Convert a macro argument Syntax node directly to a Value for passing
-/// to a cached closure call.
-///
-/// Atoms become their direct Value equivalents. Symbols and compounds
-/// become `Value::syntax(arg)` to preserve scope sets through the
-/// closure call.
-///
-/// These are **ordinary mortal allocations** born in the per-expansion transient
-/// `region` the scope mints (docs/impl/region/ctx.md — the region is named
-/// explicitly as an argument). That region is part of the expansion's closed
-/// allocation scope (docs/impl/region/macroscope.md), so the wrapped args are
-/// reclaimed with the rest of the transformer's scratch once the result is
-/// deep-copied to owned Syntax. Only the heap cases (`String`, compound
-/// `_ => syntax`) take the region. The atom cases are immediates with no region,
-/// so an all-atom argument list leaves the region unmaterialized. The scope's
-/// close then returns its id (docs/impl/region/model.md).
-fn wrap_macro_arg_value(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    arg: &Syntax,
-    region: crate::hir::region::RuntimeRegion,
-) -> Value {
-    match &arg.kind {
-        SyntaxKind::Nil => Value::NIL,
-        SyntaxKind::Bool(b) => {
-            if *b {
-                Value::TRUE
-            } else {
-                Value::FALSE
-            }
-        }
-        SyntaxKind::Int(n) => Value::int(*n),
-        SyntaxKind::Float(f) => Value::float(*f),
-        SyntaxKind::String(s) => crate::value::build::string(heap, s, region),
-        SyntaxKind::Keyword(k) => Value::keyword(k),
-        _ => crate::value::build::syntax(heap, *arg, region),
-    }
-}
 
 impl Expander {
     /// Compile (once) and cache a macro's transformer closure `(fn (params)
@@ -160,9 +118,8 @@ impl Expander {
         // The compile is a unit of its own, so the scopes and names it mints do
         // not depend on which unit first expanded the macro (docs/impl/syntax.md).
         let unit = UnitTag::of(&macro_def.name, &[fn_expr]);
-        let closure_val = self.in_unit(unit, |this| {
-            crate::pipeline::eval_syntax(fn_expr, this, symbols, vm)
-        })?;
+        let closure_val =
+            self.in_unit(unit, |this| this.eval_at_expansion(fn_expr, symbols, vm))?;
 
         // Safe: the closure was compiled and run on `vm`. A VM's heap is leaked
         // for the process or owned by its instance, which drops it after every
@@ -287,13 +244,15 @@ impl Expander {
         // own heap.
         let heap_ptr = vm.heap_ptr;
         let result_syntax = (|| {
-            // Wrap arguments as Values born in this expansion's transient region
-            // on this instance's heap.
+            // Wrap each argument as a syntax object born in this expansion's
+            // transient region on this instance's heap: an ordinary mortal
+            // allocation, which the scope's reclaim frees with the rest of the
+            // transformer's scratch (docs/impl/region/ctx.md).
             let region = region_id;
             let stamp = |arg: &Syntax| -> Value {
-                wrap_macro_arg_value(
+                crate::value::build::syntax(
                     unsafe { &mut *heap_ptr },
-                    &self.add_scope_recursive(*arg, intro_scope),
+                    self.add_scope_recursive(*arg, intro_scope),
                     region,
                 )
             };
@@ -312,7 +271,7 @@ impl Expander {
                 macro_def.name, span
             ));
             // Publish this expansion's intro scope while the transformer
-            // runs: datum->syntax strips it from copied context scopes so
+            // runs: syntax/<-datum strips it from copied context scopes so
             // its results carry the context's TRUE use-site scope set
             // (nested expansions save/restore — strictly synchronous).
             let prev_intro = crate::syntax::set_current_macro_intro(Some(intro_scope));
@@ -320,8 +279,20 @@ impl Expander {
             crate::syntax::set_current_macro_intro(prev_intro);
             let result_value = call_result.map_err(|fault| match fault {
                 CompileTimeFault::Raised(msg) => msg,
+                CompileTimeFault::AtNode { span: at, message } => {
+                    format!("{}: macro '{}': {}", at, macro_def.name, message)
+                }
                 fault => format!("{}: macro '{}': {}", span, macro_def.name, fault.describe()),
             })?;
+            // The result still holds each argument as the value passed in, so
+            // the copies are counted before the deep copy below loses them.
+            crate::lint::rules::check_argument_placed_twice(
+                &macro_def.name,
+                args,
+                &arg_values,
+                result_value,
+                &mut self.findings,
+            );
             // Deep-copy the result to owned Syntax while the transformer's
             // scratch is still live. The copy is all the expander keeps, so it
             // then gives back the one reference the call handed over with the

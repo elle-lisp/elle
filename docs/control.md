@@ -1,6 +1,6 @@
 # Control Flow
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-24 -->
 
 Elle control flow forms are expressions — they return values. Only `nil` and
 `false` are falsy; everything else is truthy.
@@ -43,7 +43,7 @@ first truthy one. For structural dispatch on data shape, see
 
 `cond` evaluates arbitrary test expressions. When you need to dispatch on
 the *structure* or *literal value* of a single expression, `match` is more
-concise. It rejects unreachable arms at compile time, and raises a
+concise. It rejects unreachable arms at compile time, and signals a
 `:match-error` at run time when no arm matches.
 
 ## case
@@ -95,6 +95,26 @@ Bind a value and branch on its truthiness.
 (when-let [q (safe-div 15 3)]
   (* q 10))                # => 50
 ```
+
+Several bindings are tested in order, and the first falsy value chooses the
+else form; the expressions after it do not run. Each binding's expression sees
+the names before it, and both forms see every name. In the else form, a name
+holds the value its expression gave, and a name whose expression did not run
+is nil. A destructuring pattern whose value is falsy or never computed binds
+each of its names to nil.
+
+```lisp
+(assert (= (if-let [a 1 b (+ a 1)] [a b] :else) [1 2]) "b's expression sees a")
+(assert (= (if-let [a nil b (error :ran)] :then :else) :else)
+        "a falsy value stops the bindings after it")
+(assert (= (if-let [a nil b 2] :then [a b]) [nil nil]) "the else form sees every name")
+(assert (= (if-let [a 1 b false] :then [a b]) [1 false]))
+(assert (= (if-let [[a b] [1 2] c nil] :then [a b c]) [1 2 nil]) "a pattern that ran")
+(assert (= (if-let [x nil {:k k} {:k 1}] :then k) nil) "a pattern that did not run")
+```
+
+A file of epoch 18 or older expands `if-let` the same way, so its else form
+reads the names the `if-let` binds, not the names around it.
 
 ## begin
 

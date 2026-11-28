@@ -1,5 +1,5 @@
 // audited: 2026-11-25
-//! Maranget's algorithm over a pattern matrix: constructors, specialization, access paths, and the tree.
+//! Maranget's compilation over a pattern matrix: column choice, specialization, the default matrix, and reachability.
 //!
 //! docs/match.md
 
@@ -334,7 +334,10 @@ pub(super) fn expand_access(
             new_access.push(AccessPath::Slice(Box::new(base.clone()), *n, kind));
         }
         Constructor::Struct(keys) | Constructor::Table(keys) => {
+            // Presence, then value, for each key, as `extract_sub_patterns`
+            // lays the sub-patterns out.
             for key in keys {
+                new_access.push(AccessPath::Has(Box::new(base.clone()), key.clone()));
                 new_access.push(AccessPath::Key(Box::new(base.clone()), key.clone()));
             }
         }

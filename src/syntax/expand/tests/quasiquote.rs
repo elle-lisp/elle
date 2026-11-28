@@ -1,116 +1,60 @@
-//! Quasiquote expansion and keyword handling tests.
+// audited: 2026-11-24
+//! What a quasiquote lowers to outside a transformer, and keyword handling.
+//!
+//! src/syntax/expand/AGENTS.md
+//!
+//! These expansions run outside any transformer's compile, so a template
+//! symbol is quoted data. The language suite pins the transformer side
+//! (`tests/lang/quoting.lisp`, `tests/lang/hygiene.lisp`).
 
 use super::*;
 
-#[test]
-fn test_quasiquote_simple_list() {
+/// The expansion of `text`, printed.
+fn expanded(text: &str) -> String {
+    let mut printed = String::new();
     crate::value::arena::with_test_region(|| {
         let (mut expander, mut symbols, mut vm, arena) = setup();
-
-        // `(a b c)
-        let syntax = read_syntax(arena, "`(a b c)", "<test>").unwrap();
-
-        let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
-        // Symbols in a quasiquoted list become `SyntaxLiteral(Value::syntax(...))`
-        // wrappers (Flatt 2016 §3 — preserves definition-site scopes), so the
-        // expansion is `(list #<syntax-literal:...> #<syntax-literal:...> ...)`.
-        let result_str = result.to_string();
-        assert!(
-            result_str.contains("list"),
-            "Result should contain 'list': {}",
-            result_str
-        );
-        assert!(
-            result_str.contains("syntax-literal"),
-            "Quasiquoted symbols should expand to syntax-literal wrappers: {}",
-            result_str
-        );
+        let syntax = read_syntax(arena, text, "<test>").unwrap();
+        printed = expander
+            .expand(syntax, &mut symbols, &mut vm)
+            .unwrap()
+            .to_string();
     });
+    printed
 }
 
 #[test]
-fn test_quasiquote_with_unquote() {
-    crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm, arena) = setup();
-
-        // `(a ,x b)
-        let syntax = read_syntax(arena, "`(a ,x b)", "<test>").unwrap();
-
-        let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
-        // `(a ,x b) expands to `(list <syntax-literal a> x <syntax-literal b>)` —
-        // the unquoted `x` appears bare while the other symbols are wrapped.
-        let result_str = result.to_string();
-        assert!(
-            result_str.contains("list"),
-            "Result should contain 'list': {}",
-            result_str
-        );
-        // Non-unquoted symbols become SyntaxLiteral for scope preservation
-        assert!(
-            result_str.contains("syntax-literal"),
-            "Quasiquoted symbols should expand to syntax-literal wrappers: {}",
-            result_str
-        );
-        assert!(
-            result_str.contains("x"),
-            "Unquoted symbol should appear bare: {}",
-            result_str
-        );
-    });
+fn a_template_symbol_outside_a_transformer_is_quoted() {
+    let out = expanded("`(a b c)");
+    assert!(out.contains("list"), "{out}");
+    assert!(!out.contains("syntax-literal"), "{out}");
+    assert!(expanded("`x") == "'x", "a bare symbol is its quote");
 }
 
 #[test]
-fn test_quasiquote_with_splicing() {
-    crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm, arena) = setup();
-
-        // `(a ,;xs b)
-        let syntax = read_syntax(arena, "`(a ,;xs b)", "<test>").unwrap();
-
-        let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
-        let result_str = result.to_string();
-        assert!(
-            result_str.contains("append"),
-            "Result should contain 'append': {}",
-            result_str
-        );
-        assert!(
-            result_str.contains("list"),
-            "Result should contain 'list': {}",
-            result_str
-        );
-        assert!(
-            result_str.contains("xs"),
-            "Result should contain 'xs': {}",
-            result_str
-        );
-    });
+fn an_unquote_is_the_expression_itself() {
+    let out = expanded("`(a ,x b)");
+    assert!(!out.contains("syntax-literal"), "{out}");
+    assert!(out.contains(" x "), "{out}");
 }
 
 #[test]
-fn test_quasiquote_non_list() {
-    crate::value::arena::with_test_region(|| {
-        let (mut expander, mut symbols, mut vm, arena) = setup();
+fn an_unquote_splice_spreads_into_the_constructor_call() {
+    // A spread takes a list, an array or an @array, where `append` took a
+    // list alone.
+    for text in ["`(a ,;xs b)", "`[a ,;xs b]"] {
+        let out = expanded(text);
+        assert!(out.contains(";xs"), "{text} expanded to {out}");
+        assert!(!out.contains("append"), "{text} expanded to {out}");
+    }
+}
 
-        // `x
-        let syntax = read_syntax(arena, "`x", "<test>").unwrap();
-
-        let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
-        let result_str = result.to_string();
-        // A bare quasiquoted symbol expands to a syntax-literal wrapper that
-        // carries the original syntax (with its scopes) through the Value
-        // round-trip.
-        assert!(
-            result_str.contains("syntax-literal"),
-            "Quasiquoted symbol should expand to a syntax-literal wrapper: {}",
-            result_str
-        );
-        assert!(
-            result_str.contains("x"),
-            "Result should contain 'x': {}",
-            result_str
-        );
-    });
+#[test]
+fn a_spelled_quasiquote_lowers_as_its_prefix_does() {
+    assert_eq!(
+        expanded("(quasiquote (a (unquote x)))"),
+        expanded("`(a ,x)")
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 //! Pins last use through loops: a binding bound outside a loop and read inside it outlives the loop, and no other does.
 //!
 //! docs/impl/region/anchors.md
@@ -155,7 +155,7 @@ fn last_use_var_to_def_bound_before_loop_extends_to_loop() {
 // would free the value (decref + nil-stamp) after the inner loop's FIRST
 // iteration. The next inner read would see nil; for an indexed-sequence
 // `each` the freed binding is the inner loop's own `len`, so the bound
-// check `(%lt idx nil)` would raise `%lt: ... integer and nil`
+// check `(%lt idx nil)` would signal `%lt: ... integer and nil`
 // (tests/lang/portrait.lisp, tests/impl/nested-loop-inner-invariant.lisp).
 // The two bounds below pin the behavior: at or after the inner loop
 // (survives it) AND strictly before the outer loop (not over-extended —

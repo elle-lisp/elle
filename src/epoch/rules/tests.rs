@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! Tests for the epoch rule tables, the collectors that read them, and the
 //! lexicon's respelling of a token.
 //!
@@ -62,8 +62,13 @@ fn test_renames_through_current() {
     assert_eq!(renames.get("coroutine?"), Some(&"fiber?"));
     assert_eq!(renames.get("coro?"), Some(&"fiber?"));
     assert_eq!(renames.get("yield-from"), Some(&"yield*"));
+    // epoch 19: the syntax operations, bare and under meta/
+    // (src/epoch/transform/tests/syntax.rs checks each one)
+    assert_eq!(renames.get("datum->syntax"), Some(&"syntax/<-datum"));
+    assert_eq!(renames.get("meta/syntax-e"), Some(&"syntax/e"));
     // 13 base renames (epochs 1–10) + 2 spawn (epoch 11) + 11 coro (epoch 12)
-    assert_eq!(renames.len(), 26);
+    // + 22 syntax operations (epoch 19)
+    assert_eq!(renames.len(), 48);
 }
 
 #[test]

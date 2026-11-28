@@ -1,4 +1,7 @@
+// audited: 2026-11-24
 //! begin-for-syntax: compile-time definition evaluation.
+//!
+//! docs/macros.md
 //!
 //! Evaluates `(def <symbol> <expr>)` forms at expansion time and stores
 //! the results in `Expander.compile_time_env`. The forms produce no
@@ -75,12 +78,14 @@ impl Expander {
         let value_syntax = parts[2];
 
         // Evaluate the value expression in the macro VM.
-        let value = crate::pipeline::eval_syntax(value_syntax, self, symbols, vm).map_err(|e| {
-            format!(
-                "{}: begin-for-syntax: error evaluating def {}: {}",
-                outer_span, name, e
-            )
-        })?;
+        let value = self
+            .eval_at_expansion(value_syntax, symbols, vm)
+            .map_err(|e| {
+                format!(
+                    "{}: begin-for-syntax: error evaluating def {}: {}",
+                    outer_span, name, e
+                )
+            })?;
 
         // Store in compile-time environment.
         self.compile_time_env.insert(name, value);

@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -56,4 +56,7 @@ pub struct AnalyzeResult {
     pub fixed: std::collections::HashMap<crate::hir::Binding, crate::signals::Signal>,
     /// The nodes built for the symbols the source spells (src/hir/analyze/overview.md).
     pub written: std::collections::HashSet<crate::hir::HirId>,
+    /// The findings the expander raised, which the HIR does not keep
+    /// (`crate::lint::lint_analysis` reports them).
+    pub expansion: Vec<crate::lint::Diagnostic>,
 }

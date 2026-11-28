@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-25
 //! The per-node last use: where the value each node produces is last read, solved to a fixpoint over binding chains.
 //!
 //! docs/impl/region/anchors.md
@@ -38,6 +38,8 @@ pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Orde
         binding_init: HashMap::new(),
         binding_scope: HashMap::new(),
         propagated_inits: rustc_hash::FxHashSet::default(),
+        loop_reads: HashMap::new(),
+        assigned: rustc_hash::FxHashSet::default(),
         iter_scope_stack: Vec::new(),
         order,
     };
@@ -118,13 +120,23 @@ pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Orde
     // what frees an unused `let`'s allocation promptly. For a `Define` the value
     // is also the form's value, so it dies wherever the `def` does, and the walk
     // already recorded that. Narrowing past it would free the value under the
-    // expression the `def` was handed to (docs/impl/region/anchors.md). A use,
-    // when there is one, still wins — the fallback is a floor, not a replacement.
+    // expression the `def` was handed to (docs/impl/region/anchors.md). An init
+    // that is a read across a loop keeps the walk's answer too: that loop reads
+    // the binding again on its next pass, so neither the narrowing nor a read
+    // of the binder's own name ending inside the loop may lower it. A read of
+    // an assigned binding takes no floor: its name holds a counted reference
+    // released on every pass (docs/impl/region/lastuse.md). A use, when there
+    // is one, still wins — the fallback is a floor, not a replacement.
     let mut staged: HashMap<HirId, HirId> = HashMap::new();
     for (binding, init_ids) in &builder.binding_init {
         let chosen = compute_chosen(binding, &builder.last_use, &builder.capture_loop_ext);
         for &init_id in init_ids {
-            let floor = if builder.propagated_inits.contains(&init_id) {
+            let floor = if builder.propagated_inits.contains(&init_id)
+                || builder
+                    .loop_reads
+                    .get(&init_id)
+                    .is_some_and(|b| !builder.assigned.contains(b))
+            {
                 builder.last_use.get(&init_id).copied().unwrap_or(init_id)
             } else {
                 init_id

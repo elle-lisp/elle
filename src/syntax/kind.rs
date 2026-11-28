@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-24
 //! The kind of a syntax node: its variants, their shapes, and the bytes a short variant leaves unwritten.
 //!
 //! docs/impl/syntax.md
@@ -75,11 +75,12 @@ pub type WrapCtor = fn(SynRef) -> SyntaxKind;
 /// How a compound kind holds its children — the shape a generic walk needs in
 /// order to take a tree apart and put an equivalent one back together.
 ///
-/// The nine sequence kinds and the six single-child kinds each differ only in
+/// The nine sequence kinds and the five single-child kinds each differ only in
 /// their tag, so every recursive pass over the tree (deep copy, scope
 /// stamping, keyword learning, the `SyntaxLiteral` scan) would otherwise
-/// repeat a fifteen-arm match. [`SyntaxKind::children`] and
-/// [`SyntaxKind::rebuild`] are that match, written once.
+/// repeat a fourteen-arm match. [`SyntaxKind::children`] and
+/// [`SyntaxKind::rebuild`] are that match, written once. A `SyntaxLiteral`
+/// holds a node but reports no children, so its shape is an atom's.
 enum Shape {
     Atom,
     /// A sequence kind and its constructor.
@@ -89,9 +90,34 @@ enum Shape {
 }
 
 impl SyntaxKind {
+    /// A list over `items`, or the quoting form the list spells out: two
+    /// items whose head is the symbol `quote`, `quasiquote`, `unquote` or
+    /// `unquote-splicing` make that form's node over the second item. The
+    /// reader, `Syntax::from_value`, `rebuild` and `Syntax::list` build every
+    /// list here, so no tree they build holds a quoting form as a list
+    /// (docs/impl/syntax.md). It is a [`SeqCtor`], so a caller names it where
+    /// it would name `SyntaxKind::List`.
+    pub fn list(items: RegionSlice<Syntax>) -> SyntaxKind {
+        if let [head, _] = items.as_slice() {
+            let quoting: Option<WrapCtor> = match head.as_symbol() {
+                Some("quote") => Some(SyntaxKind::Quote),
+                Some("quasiquote") => Some(SyntaxKind::Quasiquote),
+                Some("unquote") => Some(SyntaxKind::Unquote),
+                Some("unquote-splicing") => Some(SyntaxKind::UnquoteSplicing),
+                _ => None,
+            };
+            if let Some(make) = quoting {
+                // The form is a node of the slice, in the slice's region,
+                // which outlives every node that holds the slice.
+                return make(unsafe { SynRef::from_raw(&items.as_slice()[1]) });
+            }
+        }
+        SyntaxKind::List(items)
+    }
+
     fn shape(&self) -> Shape {
         match self {
-            SyntaxKind::List(_) => Shape::Seq(SyntaxKind::List),
+            SyntaxKind::List(_) => Shape::Seq(SyntaxKind::list),
             SyntaxKind::Array(_) => Shape::Seq(SyntaxKind::Array),
             SyntaxKind::ArrayMut(_) => Shape::Seq(SyntaxKind::ArrayMut),
             SyntaxKind::Struct(_) => Shape::Seq(SyntaxKind::Struct),
@@ -105,7 +131,6 @@ impl SyntaxKind {
             SyntaxKind::Unquote(_) => Shape::Wrap(SyntaxKind::Unquote),
             SyntaxKind::UnquoteSplicing(_) => Shape::Wrap(SyntaxKind::UnquoteSplicing),
             SyntaxKind::Splice(_) => Shape::Wrap(SyntaxKind::Splice),
-            SyntaxKind::SyntaxLiteral(_) => Shape::Wrap(SyntaxKind::SyntaxLiteral),
             _ => Shape::Atom,
         }
     }
@@ -133,6 +158,17 @@ impl SyntaxKind {
             // Reporting no children is how `children`/`rebuild` state that.
             SyntaxKind::SyntaxLiteral(_) => &[],
             _ => &[],
+        }
+    }
+
+    /// The count of children [`rebuild`](Self::rebuild) takes for this kind:
+    /// none for an atom, one for a single-child kind, and `None` for a
+    /// sequence, which takes any count.
+    pub(crate) fn fixed_children(&self) -> Option<usize> {
+        match self.shape() {
+            Shape::Atom => Some(0),
+            Shape::Wrap(_) => Some(1),
+            Shape::Seq(_) => None,
         }
     }
 

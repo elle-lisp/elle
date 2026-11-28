@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-24
 //! The expand-macro form, and how a macro's transformer cache fills and is reused.
 //!
 //! src/syntax/expand/AGENTS.md
@@ -60,14 +60,15 @@ fn test_expand_macro_unquoted_arg() {
     crate::value::arena::with_test_region(|| {
         let (mut expander, mut symbols, mut vm, arena) = setup();
 
-        // (expand-macro x) with unquoted arg returns the arg unchanged
+        // An argument that is no quoted form is an error that names the form.
+        // The counter-factual: a no-op returned `x`, and the analyzer then
+        // reported whatever `x` failed to be.
         let expand_call = read_syntax(arena, "(expand-macro x)", "<test>").unwrap();
 
-        let result = expander.expand(expand_call, &mut symbols, &mut vm);
-        assert!(result.is_ok());
-        let expanded = result.unwrap();
-        // Result should be the symbol x unchanged
-        assert_eq!(expanded.to_string(), "x");
+        let err = expander
+            .expand(expand_call, &mut symbols, &mut vm)
+            .unwrap_err();
+        assert!(err.contains("expand-macro expects a quoted form"), "{err}");
     });
 }
 
@@ -187,8 +188,8 @@ fn test_macro_cache_atom_args_falsy() {
 }
 
 /// Verify rest-param macros work correctly with the cache.
-/// Uses compile_file to ensure core.lisp (with `append`) is loaded,
-/// since splice (,;) expands to append calls.
+/// Uses compile_file to ensure the standard library is loaded around the
+/// splice (,;) the template spreads into a `list` call.
 #[test]
 fn test_macro_cache_rest_params() {
     crate::value::arena::with_test_region(|| {

@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-27
 //! `elle --help`: the usage text, with the `--trace` and `--dump` keyword
 //! lists generated from the tables that define them.
 //!
@@ -76,6 +76,9 @@ pub(super) fn print_help() {
     }
     println!("  --dump=all            Dump every stage");
     println!("  --dump=stats          Run the program, and print statistics when it ends normally");
+    if elle::config::JitPolicy::is_build_tier() {
+        println!("  --jit=POLICY          JIT policy: off, 0 (eager), or N calls (default 10)");
+    }
     #[cfg(feature = "wasm")]
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
     println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");

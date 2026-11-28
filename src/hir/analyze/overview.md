@@ -1,6 +1,6 @@
 # The analyzer
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-24 -->
 
 How the analyzer turns expanded Syntax into HIR: binding resolution, captures, signal inference and scope checks.
 
@@ -27,9 +27,9 @@ file covers how the analyzer produces it.
 |------|---------|
 | `Analyzer` | Main struct that transforms Syntax → HIR |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
-| `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees. `add_inherent_bits` is how a form that may raise reports itself |
-| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value; a call to one may raise at the call |
-| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, and a binding initialized with a lambda. A call to anything else may raise at the call. A count that does not match is a compile error once the pass ends, unless an `assign` reaches the binding |
+| `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees. `add_inherent_bits` is how a form that may signal an error reports itself |
+| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value; a call to one may signal an error at the call |
+| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, and a binding initialized with a lambda. A call to anything else may signal an error at the call. A count that does not match is a compile error once the pass ends, unless an `assign` reaches the binding |
 | `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
 | `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, by parameter position; a call checks an argument whose signal is known against them |
@@ -62,7 +62,7 @@ The analyzer tracks signals across function boundaries (see
    to `Signal::unknown()`, never a stale or same-named global's signal.
 5. **Settling**: the pass reads a seed for a lambda it has not reached yet.
    Once the pass is over, `settle` ([settle.rs](settle.rs)) solves the unit's
-   signals with [the solver](../solve/mod.rs) and raises the HIR to them. The
+   signals with [the solver](../solve/mod.rs) and lifts the HIR to them. The
    solve answers a call through a binding an `assign` reaches with every bit,
    wherever the call stands. [docs/pipeline.md](../../../docs/pipeline.md) owns the algorithm.
 
@@ -84,7 +84,7 @@ Bindings are resolved using **hygienic scope sets**:
   the frame. A call-site shadow therefore cannot capture a macro template's
   free variable; resolution falls through to top level.
 
-This prevents accidental capture in macros while allowing intentional capture via `datum->syntax`.
+This prevents accidental capture in macros while allowing intentional capture via `syntax/<-datum`.
 
 ## What the source spells
 
@@ -99,6 +99,11 @@ symbol the source spells: a variable reference, or the `get` chain of a
 qualified name, from a symbol with no intro scope. A node made for a template's
 symbol, or for a literal's constructor call, is not kept. `take_written` hands
 the set over, and the call graph of `compile/analyze` reads it.
+
+A `let`, `letrec` or `def` that binds a symbol records the symbol's span on the
+binding, as `BindingInner::site`. A macro that places one name the caller wrote
+at two binding positions makes two bindings with one site. `W004` reads them as
+one binding ([the lint rules](../../lint/README.md)).
 
 ## Invariants
 
@@ -136,7 +141,7 @@ the set over, and the call graph of `compile/analyze` reads it.
    included. The name must be a declared parameter, and a second bound on one
    parameter is a compile error. `analyze_lambda` reads the accumulators after
    analyzing the body. The bound is checked on entry, and that check may
-   raise, so a lambda with a bound carries `:error`. `analyze_call` also
+   signal an error, so a lambda with a bound carries `:error`. `analyze_call` also
    records each argument that is a lambda or a binding against the callee's
    `bound_env` entry. `settle` checks the argument's settled signal, when it
    is known, and a violation is a compile error.
@@ -146,7 +151,7 @@ the set over, and the call graph of `compile/analyze` reads it.
    each lambda's settled signal against it, and an excess bit or a propagated
    parameter is a compile error.
 
-6. **A construct that can raise carries `:error`, on its node and in the
+6. **A construct that can signal an error carries `:error`, on its node and in the
    enclosing function's sources.** The list is in
    [docs/signals/inference.md](../../../docs/signals/inference.md). Each site reports through `add_inherent_bits`; a strict
    `Destructure` is built by `destructure`, which reports for it. A call

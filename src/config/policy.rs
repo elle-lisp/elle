@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-27
 //! The compilation policies of the three optimizing tiers, the graft and the JIT verifier, and the one each build starts with.
 //!
 //! docs/config.md
@@ -18,18 +18,36 @@ pub enum JitPolicy {
 }
 
 impl JitPolicy {
-    /// The policy a build starts with: adaptive at ten calls where the JIT is
-    /// the build's tier, and off where the build carries none or another
-    /// (docs/config.md).
-    pub fn build_default() -> Self {
-        if cfg!(all(
+    /// Whether the JIT is this build's optimizing tier: the build carries it,
+    /// and neither MLIR nor WebAssembly replaces it (docs/config.md).
+    pub const fn is_build_tier() -> bool {
+        cfg!(all(
             feature = "jit",
             not(feature = "mlir"),
             not(feature = "wasm")
-        )) {
+        ))
+    }
+
+    /// The policy a build starts with: adaptive at ten calls where the JIT is
+    /// the build's tier, and off where the build carries none or another.
+    pub fn build_default() -> Self {
+        if Self::is_build_tier() {
             JitPolicy::Adaptive { threshold: 10 }
         } else {
             JitPolicy::Off
+        }
+    }
+
+    /// The policy `--jit=VALUE` names: `off`, `0` for eager, or a count of
+    /// calls. Any other value is refused, by name.
+    pub(crate) fn from_flag(value: &str) -> Result<Self, String> {
+        match (value, value.parse::<usize>()) {
+            ("off", _) => Ok(JitPolicy::Off),
+            (_, Ok(0)) => Ok(JitPolicy::Eager),
+            (_, Ok(threshold)) => Ok(JitPolicy::Adaptive { threshold }),
+            (_, Err(_)) => Err(format!(
+                "--jit: expected off, 0 or a count of calls, got '{value}'"
+            )),
         }
     }
 

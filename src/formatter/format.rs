@@ -1,4 +1,4 @@
-// audited: 2026-10-27
+// audited: 2026-11-24
 //! Doc generator: walks AnnotatedSyntax trees, produces Doc trees.
 //!
 //! docs/fmt.md
@@ -282,11 +282,13 @@ fn format_syntax(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig)
         SyntaxKind::BytesMut(_) => format_collection(node, "@b[", "]", source, config),
 
         // ── Reader macros ────────────────────────────────────
-        SyntaxKind::Quote(_) => format_reader_macro("'", node, source, config),
-        SyntaxKind::Quasiquote(_) => format_reader_macro("`", node, source, config),
-        SyntaxKind::Unquote(_) => format_reader_macro(",", node, source, config),
-        SyntaxKind::UnquoteSplicing(_) => format_reader_macro(",;", node, source, config),
-        SyntaxKind::Splice(_) => format_reader_macro(";", node, source, config),
+        SyntaxKind::Quote(_) => format_reader_macro("'", "quote", node, source, config),
+        SyntaxKind::Quasiquote(_) => format_reader_macro("`", "quasiquote", node, source, config),
+        SyntaxKind::Unquote(_) => format_reader_macro(",", "unquote", node, source, config),
+        SyntaxKind::UnquoteSplicing(_) => {
+            format_reader_macro(",;", "unquote-splicing", node, source, config)
+        }
+        SyntaxKind::Splice(_) => format_reader_macro(";", "splice", node, source, config),
 
         // ── Internal (should never appear in formatter input) ──
         SyntaxKind::SyntaxLiteral(_) => Doc::text("#<syntax-literal>"),
@@ -406,13 +408,16 @@ fn format_pairs(
 
 // ── Reader macros ──────────────────────────────────────────────
 
-/// Format a reader macro: `'x`, `` `x ``, `,x`, `;x`.
+/// Format a reader macro: `'x`, `` `x ``, `,x`, `;x`, or the list its source
+/// wrote, such as `(quote x)`.
 ///
-/// The prefix is prepended to the formatted inner form.
-/// If the inner form breaks, the prefix stays on the same line
-/// as the first element.
+/// The reader builds one node for both spellings (docs/impl/syntax.md), so
+/// the source text under the node's span decides which one prints. The
+/// prefix is prepended to the formatted inner form. If the inner form breaks,
+/// the prefix stays on the same line as the first element.
 fn format_reader_macro(
     prefix: &str,
+    name: &str,
     node: &AnnotatedSyntax,
     source: &str,
     config: &FormatterConfig,
@@ -422,7 +427,12 @@ fn format_reader_macro(
     }
 
     let inner = format_annotated(&node.children[0], source, config);
-    Doc::concat([Doc::text(prefix), inner])
+    let start = node.syntax.span.start as usize;
+    if source.as_bytes().get(start) == Some(&b'(') {
+        super::forms::parens(Doc::concat([Doc::text(format!("{name} ")), inner]))
+    } else {
+        Doc::concat([Doc::text(prefix), inner])
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-20
+# audited: 2026-11-23
 # The lint rules end to end, from source text to the rule name compile/diagnostics reports.
 # src/lint/README.md
 #
@@ -38,18 +38,71 @@
 (def typo (rule-hits "(defn f [] (let [reuslt 1] 2))\n(f)" "unused-binding"))
 (assert (= (first (names-in typo)) "reuslt") "the typo'd definition is flagged")
 
+# ── W006 argument-placed-twice ──────────────────────────────────────────
+
+(def twice "(defmacro twice [x] `(begin ,x ,x))\n")
+
+(def placed
+  (rule-hits (string twice "(defn f []\n  (twice\n    (println 1)))\n(f)")
+             "argument-placed-twice"))
+(assert (= (length placed) 1) "one argument placed twice is one finding")
+(assert (= (get (first placed) :code) "W006") "argument-placed-twice is W006")
+(assert (= (get (first placed) :severity) :warning)
+        "argument-placed-twice warns")
+(assert (string/contains? (get (first placed) :message) "'twice'")
+        "the finding names the macro")
+(assert (= (get (first placed) :line) 4) "the finding sits at the argument")
+
+(assert (= 1
+           (length (rule-hits (string twice "(twice [1 (println 2)])")
+                              "argument-placed-twice")))
+        "an array argument is compound")
+
+(each src in ["(def y 1) (twice y)" "(twice 1)" "(twice \"s\")" "(twice :k)"]
+  (assert (empty? (rule-hits (string twice src) "argument-placed-twice"))
+          "a name or a literal copies freely"))
+
+(assert (empty? (rule-hits "(defmacro show [x] `(begin (quote ,x) ,x))\n(show (println 1))"
+                           "argument-placed-twice")) "a quote does not run")
+
+(assert (= 1
+           (length (rule-hits "(defmacro hand-on [x] `(begin ,x (when true ,x)))\n(hand-on (println 1))"
+                              "argument-placed-twice")))
+        "a position inside another macro call counts")
+
+## The prelude places every argument once. The counter-factual: each placed
+## its body once for each kind of collection, and if-let its else form once
+## for each binding.
+(def prelude-uses
+  "(defn f [xs s]
+     (each x in xs (println x))
+     (if-let [a (first xs) b (rest xs)] (println a b) (println :none))
+     (when-let [a (first xs) b (rest xs)] (println a b))
+     (assert (= (length xs) 2) \"two\")
+     (case (length xs) 1 (println :one) (println :other))
+     (-> xs (first) (println))
+     (some-> s (string/trim) (println))
+     (defer (println :done) (println :body))
+     (try (println :try) (catch e (println e)))
+     (unless (empty? xs) (println :some))
+     (repeat 2 (println :again)))
+   (f [1 2] \" s \")")
+(assert (empty? (rule-hits prelude-uses "argument-placed-twice"))
+        "no prelude macro places an argument twice")
+
 # ── A macro's copies of a body raise one finding ────────────────────────
 #
-# `each` places its body once for each kind of collection, so an unused `x`
-# was four bindings. The counter-factual warned four times at one place.
+# A macro that places a body twice makes an unused `x` two bindings. The
+# counter-factual warned twice at one place.
 
 (def copies
-  (rule-hits "(defn f [xs] (each x in xs 1))\n(f [])" "unused-binding"))
+  (rule-hits (string twice "(defn f [] (twice (let [x 1] 2)))\n(f)")
+             "unused-binding"))
 (assert (= 1 (length copies)) "one finding for one binding the source writes")
 (assert (= 1
-           (length (rule-hits "(defn f [xs] (each x in xs (nope x)))\n(f [])"
+           (length (rule-hits (string twice "(defn f [] (twice (nope 1)))\n(f)")
                               "undefined-variable")))
-        "one undefined name in a body each copies is one error")
+        "one undefined name in a body a macro copies is one error")
 
 # ── A binding a macro introduced is the macro's ─────────────────────────
 

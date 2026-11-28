@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-24 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -26,7 +26,7 @@ examples run as one program under `make doctest`.
 | `(unicode! …)` | analysis | no (declaration → `nil`; 0-arg query folds to the version array) |
 | `bound` | signal inference, and a check at the call where the argument's signal is known | yes (the entry check) |
 | `silent!`, `attune!`, `numeric!`, `immutable!` | post-inference checks | no (evaluate to `nil`) |
-| `gate!` | macro expansion; the test runs at run time | yes (a runtime guard that raises `:gated`) |
+| `gate!` | macro expansion; the test runs at run time | yes (a runtime guard that signals `:gated`) |
 | `when!` / `unless!` *(proposed)* | analysis | no (the excluded body is not compiled) |
 | `emit` (signal keyword), `yield` | signal recorded at compile time | value emitted at runtime |
 | `quote`, quasiquote, `environment` | analysis/expansion | yes (data / list construction) |
@@ -61,8 +61,8 @@ Macros are defined with `defmacro` (alias `define-macro`) and expand **between
 the reader and the analyzer**. The arguments arrive quoted, the body is compiled
 and run on the VM, and the result is converted back to syntax. Expansion is hygienic
 via sets-of-scopes. Two expand-time introspection forms exist: `(macro? name)`
-answers whether `name` names a macro, and `(expand-macro 'form)` expands a form
-written with the `'` reader prefix and hands the expansion back as data.
+answers whether `name` names a macro, and `(expand-macro 'form)` expands a
+quoted form and hands the expansion back as data.
 
 ```lisp
 (defmacro inc-by-one (x) `(+ ,x 1))
@@ -74,7 +74,7 @@ written with the `'` reader prefix and hands the expansion back as data.
 (assert (= (get expansion 1) 3))
 ```
 
-Full hygiene semantics, scope sets, and the `datum->syntax` escape hatch:
+Full hygiene semantics, scope sets, and the `syntax/<-datum` escape hatch:
 [macros.md](macros.md).
 
 ## Signal-shaping forms
@@ -85,7 +85,7 @@ Signals are inferred at compile time and flow up from callee to caller (see
 | Form | Effect |
 |---|---|
 | `(silent!)` | this function's ceiling is silent: no signal at all, `:error` included; the same as `(attune! \|\|)` |
-| `(bound f spec)` | the value passed for parameter `f` emits at most `spec`, checked at the call where the compiler knows the value's signal and at entry otherwise; the entry check may raise, so the function carries `:error` |
+| `(bound f spec)` | the value passed for parameter `f` emits at most `spec`, checked at the call where the compiler knows the value's signal and at entry otherwise; the entry check may signal an error, so the function carries `:error` |
 | `(attune! :io)`, `(attune! \|:io :yield\|)` | check that this function emits at most these; its signal stays the inferred one |
 | `(emit :io)`, `(emit :yield value)` | emit a signal; the keyword is recorded at compile time, the value is emitted at run time |
 | `(yield value)` | a macro for `(emit :yield value)` |
@@ -131,7 +131,7 @@ useful language-wide (Elle's `#[cfg]`). This catalog is its single home;
 [test-runner.md](test-runner.md) says how the runner records a gated file.
 
 The loud variant exists today as a prelude macro. `(gate! COND "reason" body…)`
-runs `body` when `COND` is truthy, and otherwise raises an error whose `:error`
+runs `body` when `COND` is truthy, and otherwise signals an error whose `:error`
 is `:gated` and whose `:reason` is the string, so a harness can account for the
 skip. `COND` runs at run time: a library that loads, a service that answers, a
 device that exists.
@@ -157,7 +157,7 @@ an assertions-disabled build) is proposed alongside; its open questions are in
 `(elle/epoch)` with no arguments returns the current epoch number.
 
 ```lisp
-(assert (= (elle/epoch) 18))
+(assert (= (elle/epoch) 19))
 ```
 
 The reader reads the declaration before it lexes, because an epoch can change
@@ -272,7 +272,7 @@ supplied as data, and it is the consumer-migration half of `elle semver`
 
 **Execution:** `(compile/run-on tier closure & args)` runs the closure on one
 tier: `:bytecode`, `:jit`, `:mlir-cpu` (built with MLIR) or `:wasm` (built with
-WASM). A tier that declines the closure raises `:tier-rejected`. It is an
+WASM). A tier that declines the closure signals `:tier-rejected`. It is an
 implementation extension, not part of the language: a program that picks a
 tier tests this implementation ([spec.md](spec.md),
 [impl/differential.md](impl/differential.md)).
@@ -296,12 +296,12 @@ the compile-time forms above:
 | Form | Effect |
 |---|---|
 | `(eval expr [env])` | compile and execute a quoted datum at runtime |
-| `(read string)` | parse the first form from a string |
-| `(read-all string)` | parse every form from a string |
+| `(read string)` | parse the first form from a string, as data ([syntax.md](syntax.md)) |
+| `(read-all string)` | parse every form from a string, as data |
 
 ## See also
 
-- [macros.md](macros.md) — macro system, hygiene, `datum->syntax`
+- [macros.md](macros.md) — macro system, hygiene, `syntax/<-datum`
 - [intrinsics.md](intrinsics.md) — the `%`-intrinsic reference
 - [epochs.md](epochs.md) — epoch declaration and migration rules
 - [signals/](signals/) — signal inference, `silent!`, `bound`, `squelch`, capabilities

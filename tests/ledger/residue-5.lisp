@@ -1,5 +1,5 @@
-(elle/epoch 18)
-# audited: 2026-11-25
+(elle/epoch 19)
+# audited: 2026-11-26
 # The runner's residue ledger, part 5 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/impl/region-tail-merged-pair-uaf.lisp" :residue 4]
@@ -62,7 +62,7 @@
 ["tests/lang/abort-unwind-waits.lisp" :residue 0]
 ["tests/lang/abort-waits-for-operation.lisp" :residue 0]
 ["tests/lang/agents-index.lisp" :residue 0]
-["tests/lang/agents-links.lisp" :residue 77 :note
+["tests/lang/agents-links.lisp" :residue 79 :note
  "each generated index the tree tracks adds to the count"]
 ["tests/lang/agents-tree.lisp" :residue 0]
 ["tests/lang/agents-write.lisp" :residue 0]

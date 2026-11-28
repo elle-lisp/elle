@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-24
 //! `render_all` yields every pipeline artifact for a compiling form, and no lowered stage for one that does not read.
 //!
 //! docs/test-runner.md
@@ -10,7 +10,7 @@ use crate::runtime::Runtime;
 // (src/program/subcommand.rs `run_test`): a full `Runtime` — primitives
 // registered, stdlib loaded into its own `CompileCtx`, and the VM/symbol-table
 // thread contexts installed (the jit dump reads the VM context; the analyzer's
-// `syntax->datum` reads the symbol context). `parts()` hands out the disjoint
+// `syntax/->datum` reads the symbol context). `parts()` hands out the disjoint
 // borrows `render_all` threads explicitly.
 fn setup() -> Runtime {
     Runtime::new()

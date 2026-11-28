@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-25 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -25,8 +25,10 @@ tests/
 ├── golden/             # The snapshots impl/escape-golden.lisp compares against
 ├── modules/            # Modules the integration tests import
 ├── property/           # Property-based tests (proptest)
+├── proptest-regressions # The failing cases proptest replays first
 ├── integration/        # Full-pipeline and repository tests
 ├── unittests/          # Rust APIs tested directly
+├── prose/              # The modules of prose.rs
 ├── io_copies/          # The measuring helper `io_copies.rs` uses
 ├── image_boot/         # The modules of image_boot.rs; so too region_process_teardown/, wasm_smoke/
 ├── README.md           # The suites and the command that runs each
@@ -37,9 +39,9 @@ Everything under `lib.rs` shares one binary and one process. A file directly
 under `tests/` gets a binary of its own, which is what a test needs when its
 subject is process-global: a counter, an rlimit, a signal disposition, a
 re-exec, or a fault that would take every other test down with it
-(`worker_heap.rs`, `region_process_teardown.rs`, `wasm_smoke.rs`, …). See
-[docs/analysis/testing.md](../docs/analysis/testing.md) § "Process-global state
-needs its own binary" for when to reach for one.
+(`worker_heap.rs`, `region_process_teardown.rs`, `wasm_smoke.rs`, …).
+[docs/analysis/testing.md](../docs/analysis/testing.md) says when to reach for
+one.
 
 [prose.rs](prose.rs) has a binary of its own for another reason. QA runs it
 before anything else, so it must not wait for the shared binary to compile
@@ -71,7 +73,7 @@ input beneath the compiler as LIR or bytecode, and a property test.
 Invariants that must hold across all generated inputs: roundtrip fidelity,
 mathematical laws, type discrimination, determinism, signal inference
 soundness, and a defect's regression across an input range.
-[property/AGENTS.md](property/AGENTS.md) covers the directory.
+[tests/property](property/overview.md) holds its guide.
 
 ### Integration tests (`tests/integration/`)
 

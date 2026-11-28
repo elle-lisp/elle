@@ -1,4 +1,4 @@
-(elle/epoch 18)
+(elle/epoch 19)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -536,17 +536,17 @@
 (defn pair? [x]
   (match (%type-of x)
     :list (not (empty? x))
-    :syntax (pair? (syntax->datum x))
+    :syntax (pair? (syntax/->datum x))
     _ false))
 (defn list? [x]
   (match (%type-of x)
     :list true
-    :syntax (list? (syntax->datum x))
+    :syntax (list? (syntax/->datum x))
     _ false))
 (defn symbol? [x]
   (match (%type-of x)
     :symbol true
-    :syntax (symbol? (syntax->datum x))
+    :syntax (symbol? (syntax/->datum x))
     _ false))
 (defn even? [x]
   (when (not (integer? x))

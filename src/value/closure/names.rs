@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-24
 //! The names a code payload holds outside its value slots, which a carrier spells for another instance.
 //!
 //! docs/impl/region/template.md
@@ -66,6 +66,7 @@ impl ClosureTemplate {
             match node.instr() {
                 InstrRef::Const { value, .. }
                 | InstrRef::StructGetOrNil { key: value, .. }
+                | InstrRef::StructHasKey { key: value, .. }
                 | InstrRef::StructGetDestructure { key: value, .. } => const_name(value, &mut f),
                 InstrRef::StructRest { exclude_keys, .. } => {
                     for key in exclude_keys.iter() {

@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-27
 //! Pins the configuration: trace cells, the starting tier, the refused flags
 //! and the page size.
 //!
@@ -8,6 +8,7 @@ use super::*;
 use crate::value::fiberheap::pagepool::base_page;
 
 mod cache;
+mod jit;
 mod verifier;
 
 /// Trace state is per-instance: a `RuntimeConfig` reads and writes its own
@@ -194,13 +195,10 @@ fn a_build_without_the_mlir_tier_starts_it_off() {
 /// them, and no user runs a matrix of runtimes. Before the program such a flag
 /// is an unknown option, refused by name. The counter-factual is worse than an
 /// error: a flag that no longer parses would otherwise become the program's
-/// name, and `elle` would report a missing file called `--jit=off`.
+/// name, and `elle` would report a missing file called `--mlir=eager`.
 #[test]
 fn a_removed_flag_is_an_unknown_option() {
     for flag in [
-        "--jit=off",
-        "--jit=eager",
-        "--jit=0",
         "--mlir=eager",
         "--anf=off",
         "--no-uring",

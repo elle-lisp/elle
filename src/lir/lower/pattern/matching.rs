@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! The pattern-match entry point: the scalar patterns lower here, and the sequence and keyed families go to `seq` and `keyed`.
 //!
 //! src/lir/lower/overview.md
@@ -7,15 +7,47 @@
 use super::*;
 
 impl<'a> Lowerer<'a> {
+    /// The value in stack slot `slot`, in a fresh register. A pattern parks
+    /// its value in a slot because each read consumes its register.
+    pub(super) fn reload(&mut self, slot: u16) -> Reg {
+        let dst = self.fresh_reg();
+        self.emit(InstrRef::LoadLocal { dst, slot });
+        dst
+    }
+
+    /// End the block on `cond`: false goes to `fail_label`, and true continues
+    /// in a fresh block, left open.
+    pub(super) fn continue_if(&mut self, cond: Reg, fail_label: Label) {
+        let continue_label = self.fresh_label();
+        self.terminate(Terminator::Branch {
+            cond,
+            then_label: continue_label,
+            else_label: fail_label,
+        });
+        self.finish_block();
+        self.open_block(continue_label);
+    }
+
     /// Lower `pattern` against `value_reg`, branching to `fail_label` on a
     /// mismatch. A match binds the pattern's variables and continues in the
     /// current block.
+    ///
+    /// A pattern that tests its value tests the value's view, and a name
+    /// binds the value itself (docs/macros/syntax.md).
     pub(in crate::lir::lower) fn lower_pattern_match(
         &mut self,
         pattern: &HirPattern,
         value_reg: Reg,
         fail_label: Label,
     ) -> Result<(), String> {
+        let value_reg = match pattern {
+            HirPattern::Wildcard
+            | HirPattern::Var(_)
+            | HirPattern::Or(_)
+            | HirPattern::Set { .. }
+            | HirPattern::SetMut { .. } => value_reg,
+            _ => self.emit_syntax_view(value_reg),
+        };
         match pattern {
             HirPattern::Wildcard => {
                 // Wildcard always matches, do nothing
@@ -29,31 +61,12 @@ impl<'a> Lowerer<'a> {
                     dst: is_nil_reg,
                     src: value_reg,
                 });
-
-                // If NOT nil, fail; otherwise continue
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_nil_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(continue_label);
-
+                self.continue_if(is_nil_reg, fail_label);
                 Ok(())
             }
             HirPattern::Literal(lit) => {
                 let eq_reg = self.emit_literal_eq(value_reg, lit)?;
-
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: eq_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(continue_label);
-
+                self.continue_if(eq_reg, fail_label);
                 Ok(())
             }
             HirPattern::Var(binding) => {
@@ -88,51 +101,52 @@ impl<'a> Lowerer<'a> {
                 self.lower_keyed_pattern(pattern, value_reg, fail_label)
             }
             HirPattern::Set { binding } => {
-                // Type guard: check if value is a set
-                let is_set_reg = self.fresh_reg();
-                self.emit(InstrRef::IsSet {
-                    dst: is_set_reg,
-                    src: value_reg,
-                });
-
-                let type_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_set_reg,
-                    then_label: type_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(type_ok_label);
-
-                // Recursively match the binding (if any)
-                self.lower_pattern_match(binding, value_reg, fail_label)?;
-                Ok(())
+                self.lower_set_pattern(binding, value_reg, fail_label, true)
             }
             HirPattern::SetMut { binding } => {
-                // Type guard: check if value is a mutable set
-                let is_set_mut_reg = self.fresh_reg();
-                self.emit(InstrRef::IsSetMut {
-                    dst: is_set_mut_reg,
-                    src: value_reg,
-                });
-
-                let type_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_set_mut_reg,
-                    then_label: type_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(type_ok_label);
-
-                // Recursively match the binding (if any)
-                self.lower_pattern_match(binding, value_reg, fail_label)?;
-                Ok(())
+                self.lower_set_pattern(binding, value_reg, fail_label, false)
             }
             HirPattern::NamedStruct { .. } => {
                 // NamedStruct only appears in &named parameter destructuring, never in match.
                 unreachable!("NamedStruct in lower_pattern_match")
             }
         }
+    }
+
+    /// A set pattern: the value's view must be a set (`immutable`) or a
+    /// mutable set, and `binding` matches the whole value, as the decision
+    /// tree binds it.
+    fn lower_set_pattern(
+        &mut self,
+        binding: &HirPattern,
+        value_reg: Reg,
+        fail_label: Label,
+        immutable: bool,
+    ) -> Result<(), String> {
+        // A temp slot is a stack local, never a capture cell. The test
+        // consumes one reload and the binding another.
+        let temp_slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
+            slot: temp_slot,
+            src: value_reg,
+        });
+        let reloaded = self.reload(temp_slot);
+        let view = self.emit_syntax_view(reloaded);
+        let is_set_reg = self.fresh_reg();
+        self.emit(if immutable {
+            InstrRef::IsSet {
+                dst: is_set_reg,
+                src: view,
+            }
+        } else {
+            InstrRef::IsSetMut {
+                dst: is_set_reg,
+                src: view,
+            }
+        });
+
+        self.continue_if(is_set_reg, fail_label);
+        let reloaded = self.reload(temp_slot);
+        self.lower_pattern_match(binding, reloaded, fail_label)
     }
 }

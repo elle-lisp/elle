@@ -91,6 +91,8 @@ pub enum PatternLiteral {
     Float(f64),
     String(String),
     Keyword(String),
+    /// A quoted symbol, which matches that symbol by name.
+    Symbol(SymbolId),
 }
 
 impl Eq for PatternLiteral {}
@@ -104,6 +106,7 @@ impl std::hash::Hash for PatternLiteral {
             PatternLiteral::Int(n) => n.hash(state),
             PatternLiteral::Float(f) => f.to_bits().hash(state),
             PatternLiteral::String(s) | PatternLiteral::Keyword(s) => s.hash(state),
+            PatternLiteral::Symbol(id) => id.hash(state),
         }
     }
 }
@@ -299,7 +302,7 @@ impl HirPattern {
 
     /// True when this pattern matches every value: a wildcard, a bare
     /// variable, or an or-pattern with an irrefutable alternative.
-    /// A match with a guardless irrefutable arm cannot raise
+    /// A match with a guardless irrefutable arm cannot signal
     /// `:match-error`; signal inference keys on this.
     pub fn is_irrefutable(&self) -> bool {
         match self {

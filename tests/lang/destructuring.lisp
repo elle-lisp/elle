@@ -1,5 +1,5 @@
-(elle/epoch 18)
-# audited: 2026-11-24
+(elle/epoch 19)
+# audited: 2026-11-25
 # Destructuring patterns in def, let, let*, letrec, fn, defn and match, and the parameter markers &opt, &keys and &named.
 # docs/destructuring.md
 #
@@ -885,13 +885,14 @@
     _ :no-match))
 (assert (= match-tbl-sym 42) "match @struct symbol key")
 
-# test_match_struct_symbol_key_missing_gives_nil
-# Struct patterns match any struct (IsStruct guard); missing keys give nil
+# test_match_struct_symbol_key_missing_falls_through
+# A struct pattern matches only a struct that holds each key it names
 (def @match-sym-missing
   (match (struct 'b 99)
     {'a v} v
     _ :no-match))
-(assert (= match-sym-missing nil) "match struct symbol key missing gives nil")
+(assert (= match-sym-missing :no-match)
+        "match struct symbol key missing falls through")
 
 # test_nested_symbol_key
 (begin

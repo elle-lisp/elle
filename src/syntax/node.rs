@@ -1,7 +1,7 @@
-// audited: 2026-10-12
+// audited: 2026-11-24
 //! The syntax node: a region-resident, `Copy` tree node.
 //!
-//! docs/impl/syntax.md § "The node" owns the model. Every payload here is a
+//! docs/impl/syntax.md owns the model. Every payload here is a
 //! region handle that dereferences to an ordinary Rust view — a `&str` for a
 //! name, a `&[Syntax]` for children, a `&Syntax` for a wrapped form — so a
 //! reader of the tree matches and walks it without knowing about regions.
@@ -48,7 +48,7 @@ impl std::fmt::Debug for SynRef {
 /// Pre-analysis syntax tree node. `Copy` POD — see the module docs.
 ///
 /// `repr(C)` and exactly its fields, because a node is copied whole into
-/// its arena's pages (docs/impl/syntax.md § "The node"). The constructors
+/// its arena's pages (docs/impl/syntax.md). The constructors
 /// below are the only literals, so every one writes the pad.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -59,7 +59,7 @@ pub struct Syntax {
     pub(crate) scopes: RegionSlice<ScopeId>,
     pub span: Span,
     /// When true, `add_scope_recursive` skips this node and its children.
-    /// Set by `datum->syntax` to prevent the intro scope from being added
+    /// Set by `syntax/<-datum` to prevent the intro scope from being added
     /// to nodes that should resolve at the call site (hygiene escape hatch).
     /// Only affects `add_scope_recursive`, not `add_scope`.
     pub scope_exempt: bool,
@@ -167,7 +167,7 @@ impl Syntax {
     /// Give this node and every descendant `scopes`, and mark them all
     /// scope-exempt.
     ///
-    /// `datum->syntax` uses this to give a datum the lexical context of
+    /// `syntax/<-datum` uses this to give a datum the lexical context of
     /// another syntax object while stopping `add_scope_recursive` from
     /// overriding those scopes. It writes through the tree, so the caller must
     /// own it uniquely — see [`children_mut`](Self::children_mut).
@@ -264,7 +264,9 @@ impl Syntax {
         }
     }
 
-    /// Human-readable label for the syntax kind, used in error messages.
+    /// The name of this node's kind: the name `type-of` gives the value the
+    /// node reads as, or the quoting form's own. Error messages print it, and
+    /// `syntax/kind` answers it as a keyword.
     pub fn kind_label(&self) -> &'static str {
         match &self.kind {
             SyntaxKind::Nil => "nil",
@@ -281,7 +283,7 @@ impl Syntax {
             SyntaxKind::Struct(_) => "struct",
             SyntaxKind::StructMut(_) => "@struct",
             SyntaxKind::Set(_) => "set",
-            SyntaxKind::SetMut(_) => "mutable set",
+            SyntaxKind::SetMut(_) => "@set",
             SyntaxKind::Bytes(_) => "bytes",
             SyntaxKind::BytesMut(_) => "@bytes",
             SyntaxKind::Quote(_) => "quote",
@@ -332,9 +334,10 @@ impl Syntax {
         Syntax::new(SyntaxKind::StringMut(arena.text(s)), span)
     }
 
-    /// A list node over `items`.
+    /// A list node over `items`, or the quoting node a list of two items
+    /// spells out (`SyntaxKind::list`).
     pub fn list(arena: &SyntaxArena, items: &[Syntax], span: Span) -> Syntax {
-        Syntax::new(SyntaxKind::List(arena.nodes(items)), span)
+        Syntax::new(SyntaxKind::list(arena.nodes(items)), span)
     }
 
     /// An immutable array node over `items`.

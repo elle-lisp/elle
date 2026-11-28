@@ -86,10 +86,10 @@ impl fmt::Display for ConstRef {
             ConstRef::EmptyList => f.write_str("()"),
             ConstRef::Bool(true) => f.write_str("true"),
             ConstRef::Bool(false) => f.write_str("false"),
-            ConstRef::Int(n) => write!(f, "{}", n),
-            ConstRef::Float(n) => write!(f, "{}", n),
+            ConstRef::Int(n) => write!(f, "{n}"),
+            ConstRef::Float(n) => write!(f, "{n}"),
             ConstRef::Symbol(sid) => write!(f, "sym({})", sid.0),
-            ConstRef::Keyword(hash) => write!(f, "kw({:#x})", hash),
+            ConstRef::Keyword(hash) => write!(f, "kw({hash:#x})"),
         }
     }
 }
@@ -102,7 +102,7 @@ fn fmt_regs(regs: &[Reg], f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if i > 0 {
             f.write_str(", ")?;
         }
-        write!(f, "{}", r)?;
+        write!(f, "{r}")?;
     }
     Ok(())
 }
@@ -131,8 +131,8 @@ impl fmt::Display for InstrRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             // === Constants ===
-            InstrRef::Const { dst, value } => write!(f, "{} ← {}", dst, value),
-            InstrRef::ValueConst { dst, value } => write!(f, "{} ← val({})", dst, value),
+            InstrRef::Const { dst, value } => write!(f, "{dst} ← {value}"),
+            InstrRef::ValueConst { dst, value } => write!(f, "{dst} ← val({value})"),
             InstrRef::MaterializeConst {
                 dst,
                 template,
@@ -148,21 +148,19 @@ impl fmt::Display for InstrRef<'_> {
             }
 
             // === Variables ===
-            InstrRef::LoadLocal { dst, slot } => write!(f, "{} ← local[{}]", dst, slot),
-            InstrRef::StoreLocal { slot, src } => write!(f, "local[{}] ← {}", slot, src),
-            InstrRef::LoadCapture { dst, index } => write!(f, "{} ← cap[{}]", dst, index),
-            InstrRef::LoadCaptureRaw { dst, index } => {
-                write!(f, "{} ← cap[{}] (raw)", dst, index)
-            }
-            InstrRef::StoreCapture { index, src } => write!(f, "cap[{}] ← {}", index, src),
+            InstrRef::LoadLocal { dst, slot } => write!(f, "{dst} ← local[{slot}]"),
+            InstrRef::StoreLocal { slot, src } => write!(f, "local[{slot}] ← {src}"),
+            InstrRef::LoadCapture { dst, index } => write!(f, "{dst} ← cap[{index}]"),
+            InstrRef::LoadCaptureRaw { dst, index } => write!(f, "{dst} ← cap[{index}] (raw)"),
+            InstrRef::StoreCapture { index, src } => write!(f, "cap[{index}] ← {src}"),
 
             // === Closures ===
             InstrRef::MakeClosure { dst, captures, .. } => {
-                write!(f, "{} ← closure(", dst)?;
+                write!(f, "{dst} ← closure(")?;
                 fmt_regs(captures, f)?;
                 f.write_str(")")
             }
-            InstrRef::LoadSelf { dst } => write!(f, "{} ← self", dst),
+            InstrRef::LoadSelf { dst } => write!(f, "{dst} ← self"),
 
             // === Function Calls ===
             InstrRef::Call {
@@ -181,7 +179,7 @@ impl fmt::Display for InstrRef<'_> {
                 moves,
                 ..
             } => {
-                write!(f, "{} ← {}(", dst, func)?;
+                write!(f, "{dst} ← {func}(")?;
                 fmt_regs(args, f)?;
                 f.write_str(if *arity_checked { ") ✓" } else { ")" })?;
                 fmt_offers(" moves", moves, f)
@@ -193,7 +191,7 @@ impl fmt::Display for InstrRef<'_> {
                 late_mints,
                 ..
             } => {
-                write!(f, "tailcall {}(", func)?;
+                write!(f, "tailcall {func}(")?;
                 fmt_regs(args, f)?;
                 f.write_str(if *arity_checked { ") ✓" } else { ")" })?;
                 fmt_offers(" late", late_mints, f)
@@ -202,16 +200,14 @@ impl fmt::Display for InstrRef<'_> {
             // === Data Construction ===
             InstrRef::List {
                 dst, head, tail, ..
-            } => {
-                write!(f, "{} ← pair({}, {})", dst, head, tail)
-            }
+            } => write!(f, "{dst} ← pair({head}, {tail})"),
             InstrRef::MakeArrayMut { dst, elements, .. } => {
-                write!(f, "{} ← array(", dst)?;
+                write!(f, "{dst} ← array(")?;
                 fmt_regs(elements, f)?;
                 f.write_str(")")
             }
-            InstrRef::First { dst, pair } => write!(f, "{} ← first({})", dst, pair),
-            InstrRef::Rest { dst, pair } => write!(f, "{} ← rest({})", dst, pair),
+            InstrRef::First { dst, pair } => write!(f, "{dst} ← first({pair})"),
+            InstrRef::Rest { dst, pair } => write!(f, "{dst} ← rest({pair})"),
 
             // === Primitive Operations ===
             InstrRef::BinOp {
@@ -220,9 +216,7 @@ impl fmt::Display for InstrRef<'_> {
                 lhs,
                 rhs,
                 proof,
-            } => {
-                write!(f, "{} ← {} {} {}{}", dst, lhs, op, rhs, proof_mark(*proof))
-            }
+            } => write!(f, "{} ← {} {} {}{}", dst, lhs, op, rhs, proof_mark(*proof)),
             InstrRef::UnaryOp {
                 dst,
                 op,
@@ -234,7 +228,7 @@ impl fmt::Display for InstrRef<'_> {
                     ConvOp::IntToFloat => "float",
                     ConvOp::FloatToInt => "int",
                 };
-                write!(f, "{} ← {}({})", dst, name, src)
+                write!(f, "{dst} ← {name}({src})")
             }
             InstrRef::Compare {
                 dst,
@@ -242,87 +236,79 @@ impl fmt::Display for InstrRef<'_> {
                 lhs,
                 rhs,
                 proof,
-            } => {
-                write!(f, "{} ← {} {} {}{}", dst, lhs, op, rhs, proof_mark(*proof))
-            }
+            } => write!(f, "{} ← {} {} {}{}", dst, lhs, op, rhs, proof_mark(*proof)),
 
             // === Type Checks ===
-            InstrRef::IsNil { dst, src } => write!(f, "{} ← nil?({})", dst, src),
-            InstrRef::IsPair { dst, src } => write!(f, "{} ← pair?({})", dst, src),
-            InstrRef::IsArray { dst, src } => write!(f, "{} ← array?({})", dst, src),
-            InstrRef::IsArrayMut { dst, src } => write!(f, "{} ← @array?({})", dst, src),
-            InstrRef::IsStruct { dst, src } => write!(f, "{} ← struct?({})", dst, src),
-            InstrRef::IsStructMut { dst, src } => write!(f, "{} ← @struct?({})", dst, src),
-            InstrRef::IsSet { dst, src } => write!(f, "{} ← set?({})", dst, src),
-            InstrRef::IsSetMut { dst, src } => write!(f, "{} ← @set?({})", dst, src),
-            InstrRef::IsEmpty { dst, src } => write!(f, "{} ← empty?({})", dst, src),
-            InstrRef::IsBool { dst, src } => write!(f, "{} ← bool?({})", dst, src),
-            InstrRef::IsInt { dst, src } => write!(f, "{} ← int?({})", dst, src),
-            InstrRef::IsFloat { dst, src } => write!(f, "{} ← float?({})", dst, src),
-            InstrRef::IsString { dst, src } => write!(f, "{} ← string?({})", dst, src),
-            InstrRef::IsKeyword { dst, src } => write!(f, "{} ← keyword?({})", dst, src),
-            InstrRef::IsSymbolCheck { dst, src } => write!(f, "{} ← symbol?({})", dst, src),
-            InstrRef::IsBytes { dst, src } => write!(f, "{} ← bytes?({})", dst, src),
-            InstrRef::IsBox { dst, src } => write!(f, "{} ← box?({})", dst, src),
-            InstrRef::IsClosure { dst, src } => write!(f, "{} ← closure?({})", dst, src),
-            InstrRef::IsFiber { dst, src } => write!(f, "{} ← fiber?({})", dst, src),
-            InstrRef::TypeOf { dst, src } => write!(f, "{} ← type-of({})", dst, src),
-            InstrRef::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
+            InstrRef::IsNil { dst, src } => write!(f, "{dst} ← nil?({src})"),
+            InstrRef::IsPair { dst, src } => write!(f, "{dst} ← pair?({src})"),
+            InstrRef::IsArray { dst, src } => write!(f, "{dst} ← array?({src})"),
+            InstrRef::IsArrayMut { dst, src } => write!(f, "{dst} ← @array?({src})"),
+            InstrRef::IsStruct { dst, src } => write!(f, "{dst} ← struct?({src})"),
+            InstrRef::IsStructMut { dst, src } => write!(f, "{dst} ← @struct?({src})"),
+            InstrRef::IsSet { dst, src } => write!(f, "{dst} ← set?({src})"),
+            InstrRef::IsSetMut { dst, src } => write!(f, "{dst} ← @set?({src})"),
+            InstrRef::SyntaxView { dst, src } => write!(f, "{dst} ← view({src})"),
+            InstrRef::IsEmpty { dst, src } => write!(f, "{dst} ← empty?({src})"),
+            InstrRef::IsBool { dst, src } => write!(f, "{dst} ← bool?({src})"),
+            InstrRef::IsInt { dst, src } => write!(f, "{dst} ← int?({src})"),
+            InstrRef::IsFloat { dst, src } => write!(f, "{dst} ← float?({src})"),
+            InstrRef::IsString { dst, src } => write!(f, "{dst} ← string?({src})"),
+            InstrRef::IsKeyword { dst, src } => write!(f, "{dst} ← keyword?({src})"),
+            InstrRef::IsSymbolCheck { dst, src } => write!(f, "{dst} ← symbol?({src})"),
+            InstrRef::IsBytes { dst, src } => write!(f, "{dst} ← bytes?({src})"),
+            InstrRef::IsBox { dst, src } => write!(f, "{dst} ← box?({src})"),
+            InstrRef::IsClosure { dst, src } => write!(f, "{dst} ← closure?({src})"),
+            InstrRef::IsFiber { dst, src } => write!(f, "{dst} ← fiber?({src})"),
+            InstrRef::TypeOf { dst, src } => write!(f, "{dst} ← type-of({src})"),
+            InstrRef::ArrayMutLen { dst, src } => write!(f, "{dst} ← len({src})"),
 
             // === Capture Cells ===
-            InstrRef::MakeCaptureCell { dst, value, .. } => write!(f, "{} ← cell({})", dst, value),
-            InstrRef::LoadCaptureCell { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
-            InstrRef::StoreCaptureCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
+            InstrRef::MakeCaptureCell { dst, value, .. } => write!(f, "{dst} ← cell({value})"),
+            InstrRef::LoadCaptureCell { dst, cell } => write!(f, "{dst} ← deref({cell})"),
+            InstrRef::StoreCaptureCell { cell, value } => write!(f, "deref({cell}) ← {value}"),
 
             // === Destructuring ===
-            InstrRef::MatchFail { dst, src } => write!(f, "{} ← match-fail!({})", dst, src),
-            InstrRef::FirstDestructure { dst, src } => write!(f, "{} ← first!({})", dst, src),
-            InstrRef::RestDestructure { dst, src } => write!(f, "{} ← rest!({})", dst, src),
+            InstrRef::MatchFail { dst, src } => write!(f, "{dst} ← match-fail!({src})"),
+            InstrRef::FirstDestructure { dst, src } => write!(f, "{dst} ← first!({src})"),
+            InstrRef::RestDestructure { dst, src } => write!(f, "{dst} ← rest!({src})"),
             InstrRef::ArrayMutRefDestructure { dst, src, index } => {
-                write!(f, "{} ← {}[{}]!", dst, src, index)
+                write!(f, "{dst} ← {src}[{index}]!")
             }
             InstrRef::ArraySliceFrom { dst, src, index } => {
-                write!(f, "{} ← {}[{}..]", dst, src, index)
+                write!(f, "{dst} ← {src}[{index}..]")
             }
             InstrRef::ArrayMutSliceFrom { dst, src, index } => {
-                write!(f, "{} ← @{}[{}..]", dst, src, index)
+                write!(f, "{dst} ← @{src}[{index}..]")
             }
-            InstrRef::StructGetOrNil { dst, src, key } => {
-                write!(f, "{} ← {}.{}?", dst, src, key)
-            }
-            InstrRef::StructGetDestructure { dst, src, key } => {
-                write!(f, "{} ← {}.{}!", dst, src, key)
-            }
+            InstrRef::StructGetOrNil { dst, src, key } => write!(f, "{dst} ← {src}.{key}?"),
+            InstrRef::StructHasKey { dst, src, key } => write!(f, "{dst} ← has-key?({src}, {key})"),
+            InstrRef::StructGetDestructure { dst, src, key } => write!(f, "{dst} ← {src}.{key}!"),
             InstrRef::StructRest {
                 dst,
                 src,
                 exclude_keys,
             } => {
-                let keys: Vec<String> = exclude_keys.iter().map(|k| format!("{}", k)).collect();
-                write!(f, "{} ← rest({}, excl=[{}])", dst, src, keys.join(", "))
+                let keys: Vec<String> = exclude_keys.iter().map(|k| k.to_string()).collect();
+                write!(f, "{dst} ← rest({src}, excl=[{}])", keys.join(", "))
             }
 
             // === Silent destructuring (parameter context) ===
-            InstrRef::FirstOrNil { dst, src } => write!(f, "{} ← first?({})", dst, src),
-            InstrRef::RestOrNil { dst, src } => write!(f, "{} ← rest?({})", dst, src),
-            InstrRef::ArrayMutRefOrNil { dst, src, index } => {
-                write!(f, "{} ← {}[{}]?", dst, src, index)
-            }
+            InstrRef::FirstOrNil { dst, src } => write!(f, "{dst} ← first?({src})"),
+            InstrRef::RestOrNil { dst, src } => write!(f, "{dst} ← rest?({src})"),
+            InstrRef::ArrayMutRefOrNil { dst, src, index } => write!(f, "{dst} ← {src}[{index}]?"),
 
             // === Fibers ===
-            InstrRef::LoadResumeValue { dst } => write!(f, "{} ← resume-val", dst),
+            InstrRef::LoadResumeValue { dst } => write!(f, "{dst} ← resume-val"),
 
             // === Runtime Eval ===
-            InstrRef::Eval { dst, expr, env } => {
-                write!(f, "{} ← eval({}, {})", dst, expr, env)
-            }
+            InstrRef::Eval { dst, expr, env } => write!(f, "{dst} ← eval({expr}, {env})"),
 
             // === Splice Support ===
             InstrRef::ArrayMutExtend { dst, array, source } => {
-                write!(f, "{} ← extend({}, {})", dst, array, source)
+                write!(f, "{dst} ← extend({array}, {source})")
             }
             InstrRef::ArrayMutPush { dst, array, value } => {
-                write!(f, "{} ← push({}, {})", dst, array, value)
+                write!(f, "{dst} ← push({array}, {value})")
             }
             InstrRef::CallArrayMut {
                 dst,
@@ -331,11 +317,7 @@ impl fmt::Display for InstrRef<'_> {
                 args_region,
                 ..
             } => {
-                write!(
-                    f,
-                    "{} ← {}(;{}) [args-region {}]",
-                    dst, func, args, args_region
-                )
+                write!(f, "{dst} ← {func}(;{args}) [args-region {args_region}]")
             }
             InstrRef::TailCallArrayMut {
                 func,
@@ -343,11 +325,7 @@ impl fmt::Display for InstrRef<'_> {
                 args_region,
                 ..
             } => {
-                write!(
-                    f,
-                    "tailcall {}(;{}) [args-region {}]",
-                    func, args, args_region
-                )
+                write!(f, "tailcall {func}(;{args}) [args-region {args_region}]")
             }
 
             // === Allocation Regions ===
@@ -365,9 +343,7 @@ impl fmt::Display for InstrRef<'_> {
             InstrRef::AdoptCellRegion { parent, child } => {
                 write!(f, "adopt-cell-region parent={parent} child={child}")
             }
-            InstrRef::AdoptIntoActivation { child } => {
-                write!(f, "adopt-into-activation {child}")
-            }
+            InstrRef::AdoptIntoActivation { child } => write!(f, "adopt-into-activation {child}"),
             InstrRef::FreeRegionGroup { members } => {
                 write!(f, "free-region-group(")?;
                 fmt_regs(members, f)?;
@@ -390,34 +366,28 @@ impl fmt::Display for InstrRef<'_> {
             InstrRef::PopParamFrame => f.write_str("pop-param-frame"),
 
             // === Data Access ===
-            InstrRef::Length { dst, src } => write!(f, "{} ← length({})", dst, src),
-            InstrRef::Get { dst, obj, key } => write!(f, "{} ← get({}, {})", dst, obj, key),
-            InstrRef::Put { dst, obj, key, val } => {
-                write!(f, "{} ← put({}, {}, {})", dst, obj, key, val)
-            }
-            InstrRef::Del { dst, obj, key } => write!(f, "{} ← del({}, {})", dst, obj, key),
-            InstrRef::Has { dst, obj, key } => write!(f, "{} ← has?({}, {})", dst, obj, key),
-            InstrRef::IntrPush { dst, array, value } => {
-                write!(f, "{} ← push({}, {})", dst, array, value)
-            }
+            InstrRef::Length { dst, src } => write!(f, "{dst} ← length({src})"),
+            InstrRef::Get { dst, obj, key } => write!(f, "{dst} ← get({obj}, {key})"),
+            InstrRef::Put { dst, obj, key, val } => write!(f, "{dst} ← put({obj}, {key}, {val})"),
+            InstrRef::Del { dst, obj, key } => write!(f, "{dst} ← del({obj}, {key})"),
+            InstrRef::Has { dst, obj, key } => write!(f, "{dst} ← has?({obj}, {key})"),
+            InstrRef::IntrPush { dst, array, value } => write!(f, "{dst} ← push({array}, {value})"),
             InstrRef::IntrStringPush { dst, string, value } => {
-                write!(f, "{} ← string-push({}, {})", dst, string, value)
+                write!(f, "{dst} ← string-push({string}, {value})")
             }
             InstrRef::IntrBytesPush { dst, bytes, value } => {
-                write!(f, "{} ← bytes-push({}, {})", dst, bytes, value)
+                write!(f, "{dst} ← bytes-push({bytes}, {value})")
             }
-            InstrRef::Pop { dst, src } => write!(f, "{} ← pop({})", dst, src),
+            InstrRef::Pop { dst, src } => write!(f, "{dst} ← pop({src})"),
 
             // === Mutability ===
-            InstrRef::Freeze { dst, src, .. } => write!(f, "{} ← freeze({})", dst, src),
-            InstrRef::Thaw { dst, src, .. } => write!(f, "{} ← thaw({})", dst, src),
+            InstrRef::Freeze { dst, src, .. } => write!(f, "{dst} ← freeze({src})"),
+            InstrRef::Thaw { dst, src, .. } => write!(f, "{dst} ← thaw({src})"),
 
             // === Identity ===
-            InstrRef::Identical { dst, lhs, rhs } => {
-                write!(f, "{} ← identical?({}, {})", dst, lhs, rhs)
-            }
+            InstrRef::Identical { dst, lhs, rhs } => write!(f, "{dst} ← identical?({lhs}, {rhs})"),
             InstrRef::CheckSignalBound { src, allowed_bits } => {
-                write!(f, "check-signal-bound {} allowed={}", src, allowed_bits)
+                write!(f, "check-signal-bound {src} allowed={allowed_bits}")
             }
         }
     }
@@ -428,20 +398,18 @@ impl fmt::Display for InstrRef<'_> {
 impl fmt::Display for Terminator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Terminator::Return(reg) => write!(f, "return {}", reg),
-            Terminator::Jump(label) => write!(f, "jump → {}", label),
+            Terminator::Return(reg) => write!(f, "return {reg}"),
+            Terminator::Jump(label) => write!(f, "jump → {label}"),
             Terminator::Branch {
                 cond,
                 then_label,
                 else_label,
-            } => write!(f, "branch {} → {} / {}", cond, then_label, else_label),
+            } => write!(f, "branch {cond} → {then_label} / {else_label}"),
             Terminator::Emit {
                 signal,
                 value,
                 resume_label,
-            } => {
-                write!(f, "emit {} {} → {}", signal, value, resume_label)
-            }
+            } => write!(f, "emit {signal} {value} → {resume_label}"),
             Terminator::Unreachable => f.write_str("unreachable"),
         }
     }

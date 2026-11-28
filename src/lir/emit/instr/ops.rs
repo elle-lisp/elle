@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! Emitting the operator, region-refcount and parameter-frame instructions.
 //!
 //! src/lir/emit/overview.md
@@ -12,6 +12,15 @@ use super::*;
 mod intrinsics;
 
 impl Emitter {
+    /// Emit `op`, which pops one operand and pushes its result: bring `src` to
+    /// the top, emit the opcode, and leave `dst` in its place.
+    fn emit_unary(&mut self, dst: Reg, src: Reg, op: Instruction) {
+        self.ensure_on_top(src);
+        self.bytecode.emit(op);
+        self.pop();
+        self.push_reg(dst);
+    }
+
     /// Operator, predicate, region-refcount, and collection-op instruction
     /// emission (chain tail from `emit_instr`).
     pub(super) fn emit_instr_ops(&mut self, instr: &InstrRef<'_>) {
@@ -115,67 +124,32 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            InstrRef::IsNil { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsNil);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::IsNil { dst, src } => self.emit_unary(*dst, *src, Instruction::IsNil),
 
-            InstrRef::IsPair { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsPair);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::IsPair { dst, src } => self.emit_unary(*dst, *src, Instruction::IsPair),
 
-            InstrRef::IsArray { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsArray);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::IsArray { dst, src } => self.emit_unary(*dst, *src, Instruction::IsArray),
 
             InstrRef::IsArrayMut { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsArrayMut);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_unary(*dst, *src, Instruction::IsArrayMut)
             }
 
-            InstrRef::IsStruct { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsStruct);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::IsStruct { dst, src } => self.emit_unary(*dst, *src, Instruction::IsStruct),
 
             InstrRef::IsStructMut { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsStructMut);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_unary(*dst, *src, Instruction::IsStructMut)
             }
 
-            InstrRef::IsSet { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsSet);
-                self.pop();
-                self.push_reg(*dst);
-            }
+            InstrRef::IsSet { dst, src } => self.emit_unary(*dst, *src, Instruction::IsSet),
 
-            InstrRef::IsSetMut { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsSetMut);
-                self.pop();
-                self.push_reg(*dst);
+            InstrRef::IsSetMut { dst, src } => self.emit_unary(*dst, *src, Instruction::IsSetMut),
+
+            InstrRef::SyntaxView { dst, src } => {
+                self.emit_unary(*dst, *src, Instruction::SyntaxView)
             }
 
             InstrRef::ArrayMutLen { dst, src } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutLen);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_unary(*dst, *src, Instruction::ArrayMutLen)
             }
 
             InstrRef::MakeCaptureCell {

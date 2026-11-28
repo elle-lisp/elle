@@ -7,26 +7,48 @@ use super::*;
 
 impl RegionStore {
     /// Open a closed-scope mint log (docs/impl/region/macroscope.md). Every
-    /// region minted until the matching `reclaim_mint_scope` is recorded. The
-    /// scope does not nest:
-    /// macro transformer bodies are compiled code that does not re-enter the
-    /// expander, so a transformer call mints no nested scope.
+    /// region minted until the matching `reclaim_mint_scope` is recorded in it.
+    /// A scope nests: a transformer's `eval` expands macros inside the
+    /// transformer's own scope, and a mint records into the innermost log.
     pub fn begin_mint_log(&mut self) {
-        debug_assert!(
-            self.mint_log.is_none(),
-            "nested mint log — a closed allocation scope was opened inside another \
-             (a macro transformer re-entered macro expansion?)"
-        );
-        self.mint_log = Some(Vec::new());
+        self.mint_logs.push(Vec::new());
+    }
+
+    /// Record that a Rust structure holds one of `id`'s counted references,
+    /// which a reclaim then counts as explained.
+    pub fn note_rust_hold(&mut self, id: u32) {
+        *self.rust_holds.entry(id).or_insert(0) += 1;
+    }
+
+    /// Forget one Rust-held reference to `id`, before its holder releases it.
+    pub fn drop_rust_hold(&mut self, id: u32) {
+        let held = self
+            .rust_holds
+            .get_mut(&id)
+            .expect("a released Rust hold was noted when it was taken");
+        *held -= 1;
+        if *held == 0 {
+            self.rust_holds.remove(&id);
+        }
+    }
+
+    /// Whether the region `id` names is still the one minted at generation
+    /// `gen`.
+    fn minted_live(&self, id: u32, gen: u32) -> bool {
+        let idx = id as usize;
+        idx < self.regions.len()
+            && self.regions[idx].is_some()
+            && self.generations.get(idx).copied().unwrap_or(0) == gen
     }
 
     /// Close the scope opened by `begin_mint_log` and reclaim its dead
     /// scratch by RC. The pass visits every region minted in the scope that is
     /// still live: its generation still matches the mint record, so a recycled
     /// id whose region was already freed mid-scope is skipped. It balances each
-    /// such region's **unexplained** references, `rc − in_degree`.
+    /// such region's **unexplained** references, `rc − in_degree − held`.
     /// `in_degree` counts the references the region receives from the contents
-    /// of the *other survivors*, the internal edges of the scratch DAG. The body
+    /// of the *other survivors*, the internal edges of the scratch DAG, and
+    /// `held` the references a Rust structure holds (`note_rust_hold`). The body
     /// comment argues why scanning only the scope, not the whole heap, is both
     /// fast and sufficient.
     ///
@@ -44,11 +66,28 @@ impl RegionStore {
     /// when it dispatches a trait method (for example `append`'s `empty?`), so
     /// the root region can land in the mint log. Reclaiming it would free the trait tables under the running
     /// program. Returns the number of objects reclaimed (for `alloc_count`).
+    ///
+    /// The scope closed is the innermost. A region its reclaim leaves live
+    /// joins the enclosing scope's log, whose reclaim balances it again.
     pub fn reclaim_mint_scope(&mut self, protected: &[RuntimeRegion]) -> usize {
-        let log = match self.mint_log.take() {
-            Some(l) => l,
-            None => return 0,
+        let Some(log) = self.mint_logs.pop() else {
+            return 0;
         };
+        let freed = self.reclaim_log(&log, protected);
+        let left: Vec<(u32, u32)> = log
+            .into_iter()
+            .filter(|&(id, gen)| self.minted_live(id, gen))
+            .collect();
+        if let Some(enclosing) = self.mint_logs.last_mut() {
+            enclosing.extend(left);
+        }
+        freed
+    }
+
+    /// Balance the unexplained references of every region `log` minted that
+    /// is still live, as [`reclaim_mint_scope`](Self::reclaim_mint_scope)
+    /// states.
+    fn reclaim_log(&mut self, log: &[(u32, u32)], protected: &[RuntimeRegion]) -> usize {
         let protected_set: std::collections::HashSet<u32> =
             protected.iter().map(|r| r.get()).collect();
         // Survivors: minted ids still naming the region we minted (generation
@@ -57,11 +96,8 @@ impl RegionStore {
         // only the current one survives.
         let mut surv_set: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let mut survivors: Vec<(u32, u32)> = Vec::new();
-        for (id, gen) in log {
-            let idx = id as usize;
-            let live = idx < self.regions.len() && self.regions[idx].is_some();
-            let gen_ok = self.generations.get(idx).copied().unwrap_or(0) == gen;
-            if live && gen_ok && !protected_set.contains(&id) && surv_set.insert(id) {
+        for &(id, gen) in log {
+            if self.minted_live(id, gen) && !protected_set.contains(&id) && surv_set.insert(id) {
                 survivors.push((id, gen));
             }
         }
@@ -117,7 +153,9 @@ impl RegionStore {
                 // never decref'd here (escape saturates to 0). For `Counted` it
                 // is the live count.
                 let rc = self.regions[id as usize].as_ref().map_or(0, |e| e.count());
-                (id, rc.saturating_sub(indeg.get(&id).copied().unwrap_or(0)))
+                let explained = indeg.get(&id).copied().unwrap_or(0)
+                    + self.rust_holds.get(&id).copied().unwrap_or(0);
+                (id, rc.saturating_sub(explained))
             })
             .collect();
         // Balance each survivor's unexplained references. Cascades (Rule 7) may
@@ -126,11 +164,8 @@ impl RegionStore {
         // region's own escape decrefs free it, so nothing is double-freed.
         let mut freed_objs = 0;
         for (id, gen) in survivors {
-            let idx = id as usize;
             for _ in 0..escape.get(&id).copied().unwrap_or(0) {
-                let live = idx < self.regions.len() && self.regions[idx].is_some();
-                let gen_ok = self.generations.get(idx).copied().unwrap_or(0) == gen;
-                if !(live && gen_ok) {
+                if !self.minted_live(id, gen) {
                     break;
                 }
                 if let Some(r) = RuntimeRegion::new(id) {
@@ -139,5 +174,31 @@ impl RegionStore {
             }
         }
         freed_objs
+    }
+}
+
+/// The heap's surface over its store's mint scopes.
+impl crate::value::FiberHeap {
+    /// Open a mint scope around a macro expansion, as
+    /// `RegionStore::begin_mint_log` does.
+    pub fn begin_region_mint_log(&mut self) {
+        self.region_store.begin_mint_log();
+    }
+
+    /// [`RegionStore::note_rust_hold`] for `region`.
+    pub(crate) fn note_rust_hold(&mut self, region: RuntimeRegion) {
+        self.region_store.note_rust_hold(region.get());
+    }
+
+    /// [`RegionStore::drop_rust_hold`] for `region`.
+    pub(crate) fn drop_rust_hold(&mut self, region: RuntimeRegion) {
+        self.region_store.drop_rust_hold(region.get());
+    }
+
+    /// Close the innermost mint scope, as `RegionStore::reclaim_mint_scope`
+    /// does, and take the objects it reclaimed off `alloc_count`.
+    pub fn reclaim_region_mint_scope(&mut self, protected: &[RuntimeRegion]) {
+        let freed = self.region_store.reclaim_mint_scope(protected);
+        self.alloc_count -= freed;
     }
 }

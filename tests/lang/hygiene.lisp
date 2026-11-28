@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-22
+(elle/epoch 19)
+# audited: 2026-11-24
 # A macro template resolves its own names where the macro is defined, and datum->syntax is how a template binds a name for its caller.
 # docs/macros.md
 
@@ -132,8 +132,8 @@
 ## An anaphoric if binds `it` with the scopes of its test argument, so the
 ## caller's branches can name it.
 (defmacro aif [test then else]
-  `(let [,(datum->syntax test 'it) ,test]
-     (if ,(datum->syntax test 'it) ,then ,else)))
+  `(let [,(syntax/<-datum test 'it) ,test]
+     (if ,(syntax/<-datum test 'it) ,then ,else)))
 
 (assert (= (aif 42 it 0) 42) "aif binds it to a truthy test")
 (assert (= (aif false 42 0) 0) "aif takes the else branch on a falsy test")
@@ -143,9 +143,9 @@
   (assert (= (aif 42 it 0) 42)
           "the it aif binds shadows a caller's it in its branches"))
 
-## The context may be an atom argument, which arrives as a plain value.
+## The context may be an atom argument, which carries the call site's scopes.
 (defmacro bind-as-x [val body]
-  `(let [,(datum->syntax val 'x) ,val]
+  `(let [,(syntax/<-datum val 'x) ,val]
      ,body))
 
 (assert (= (bind-as-x 100 (+ x 1)) 101) "datum->syntax with an atom context")
@@ -153,7 +153,7 @@
 ## The context may be a symbol argument, which arrives as a syntax object
 ## whose scopes the new name copies.
 (defmacro bind-it [name val body]
-  `(let [,(datum->syntax name 'it) ,val]
+  `(let [,(syntax/<-datum name 'it) ,val]
      ,body))
 
 (assert (= (bind-it x 42 (+ it 1)) 43) "datum->syntax with a symbol context")
@@ -162,7 +162,7 @@
 ## binding datum->syntax makes carries the caller's alone, so the reference
 ## sees it.
 (defmacro inject-list [ctx]
-  `(let [,(datum->syntax ctx 'result) (list 1 2 3)]
+  `(let [,(syntax/<-datum ctx 'result) (list 1 2 3)]
      result))
 
 (assert (= (inject-list x) (list 1 2 3))

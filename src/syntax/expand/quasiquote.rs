@@ -1,4 +1,9 @@
-//! Quasiquote expansion to runtime list construction
+// audited: 2026-11-24
+//! Quasiquote lowering: a template becomes the code that builds its value.
+//!
+//! docs/syntax.md
+//! docs/macros.md
+//! src/syntax/expand/AGENTS.md
 
 use super::Expander;
 use crate::symbol::SymbolTable;
@@ -6,8 +11,8 @@ use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::vm::VM;
 
 impl Expander {
-    /// Convert quasiquote to code that constructs the value at runtime
-    /// depth tracks nesting level for nested quasiquotes
+    /// The code that builds the value of the template `syntax` at nesting
+    /// level `depth`, which is one inside the outermost quasiquote.
     pub(super) fn quasiquote_to_code(
         &mut self,
         syntax: &Syntax,
@@ -17,185 +22,108 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<Syntax, String> {
         match &syntax.kind {
-            // Unquote at depth 1 - evaluate the expression
+            // An unquote that reaches level zero is the expression itself.
             SyntaxKind::Unquote(inner) if depth == 1 => self.expand(**inner, symbols, vm),
-
-            // Nested unquote - decrease depth
-            SyntaxKind::Unquote(inner) if depth > 1 => {
-                let expanded = self.quasiquote_to_code(inner, depth - 1, span, symbols, vm)?;
-                // Wrap in (list (quote unquote) expanded)
-                Ok(self.make_list(
-                    vec![
-                        self.make_symbol("list", *span),
-                        self.make_list(
-                            vec![
-                                self.make_symbol("quote", *span),
-                                self.make_symbol("unquote", *span),
-                            ],
-                            *span,
-                        ),
-                        expanded,
-                    ],
-                    *span,
-                ))
+            SyntaxKind::Unquote(inner) => {
+                self.level_form("unquote", inner, depth - 1, span, symbols, vm)
             }
-
-            // Nested quasiquote - increase depth
             SyntaxKind::Quasiquote(inner) => {
-                let expanded = self.quasiquote_to_code(inner, depth + 1, span, symbols, vm)?;
-                Ok(self.make_list(
-                    vec![
-                        self.make_symbol("list", *span),
-                        self.make_list(
-                            vec![
-                                self.make_symbol("quote", *span),
-                                self.make_symbol("quasiquote", *span),
-                            ],
-                            *span,
-                        ),
-                        expanded,
-                    ],
-                    *span,
-                ))
+                self.level_form("quasiquote", inner, depth + 1, span, symbols, vm)
             }
-
-            // List - process elements, handling unquote-splicing
+            // A quote keeps the level, so the holes inside it evaluate.
+            SyntaxKind::Quote(inner) => self.level_form("quote", inner, depth, span, symbols, vm),
+            SyntaxKind::List(items) if items.is_empty() => Ok(self.quoted(*syntax, span)),
             SyntaxKind::List(items) => {
-                self.quasiquote_list_to_code(items, depth, span, symbols, vm)
+                self.constructor_call("list", items, depth, span, symbols, vm)
             }
-
-            // Array (bracket syntax) — process elements so unquote/splice work
-            // inside `[...]`, producing a runtime array via the `array` primitive.
-            // This enables `[,a ,b]` in quasiquote and bracket bindings in
-            // macro output: `(let [,name ,val] ...)`.
             SyntaxKind::Array(items) => {
-                self.quasiquote_array_to_code(items, depth, span, symbols, vm)
+                self.constructor_call("array", items, depth, span, symbols, vm)
             }
-
-            // StructMut — quasiquote treats it as data (quoted)
-            SyntaxKind::StructMut(_) => {
-                Ok(self.make_list(vec![self.make_symbol("quote", *span), *syntax], *span))
-            }
-
-            // Symbols: wrap as SyntaxLiteral to preserve definition-site
-            // scopes through the Value round-trip (Flatt 2016 §3). Without
-            // this, template symbols become bare Values and lose their scopes.
-            // The intro scope is added later by add_scope_recursive, which
-            // together with the definition-site scopes ensures correct
-            // resolution even when the call site shadows the same name.
-            SyntaxKind::Symbol(_) => Ok(Syntax::new(
-                // Carry the template symbol as plain compile-time data (its scope
-                // set rides along in the `Syntax`), NOT a heap `Value`. The
-                // analyzer materializes it as a fresh ordinary allocation per
-                // execution.
+            // Code that runs at expansion builds code, so a template symbol
+            // there keeps the scopes of the place it was written. The analyzer
+            // materializes the literal as a syntax object.
+            SyntaxKind::Symbol(_) if self.in_transformer => Ok(Syntax::new(
                 SyntaxKind::SyntaxLiteral(self.arena().node(*syntax)),
                 *span,
             )),
-
-            // Everything else gets quoted (atoms don't participate in binding)
-            _ => Ok(self.make_list(vec![self.make_symbol("quote", *span), *syntax], *span)),
+            // Every other form is data: an atom, a struct, or a symbol in code
+            // that runs after expansion.
+            _ => Ok(self.quoted(*syntax, span)),
         }
     }
 
-    /// Convert a quasiquoted array `[...]` to code that constructs an
-    /// immutable array at runtime. Uses the `array` primitive so that
-    /// unquote/splice work inside brackets in macro templates. The macro
-    /// evaluator produces an immutable array Value, which `from_value`
-    /// converts back to `SyntaxKind::Array` — preserving bracket syntax
-    /// through the expansion round-trip.
-    pub(super) fn quasiquote_array_to_code(
+    /// `(list 'name level)`: a quoting form inside the template, which stays a
+    /// form in the value.
+    fn level_form(
         &mut self,
+        name: &str,
+        inner: &Syntax,
+        depth: usize,
+        span: &Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let level = self.quasiquote_to_code(inner, depth, span, symbols, vm)?;
+        let head = self.quoted(self.make_symbol(name, *span), span);
+        Ok(self.make_list(vec![self.make_symbol("list", *span), head, level], *span))
+    }
+
+    /// `(quote form)`.
+    fn quoted(&self, form: Syntax, span: &Span) -> Syntax {
+        Syntax::quote(&self.arena(), form, *span)
+    }
+
+    /// What an unquote-splice of `value` spreads. In code that runs at
+    /// expansion the value is often a syntax object, a macro's argument, so
+    /// there a syntax object spreads its children:
+    /// `(let [spread value] (if (%eq (type-of spread) :syntax) (syntax/children spread) spread))`.
+    /// `value` sits in the binding's init, so the name cannot capture it.
+    fn spread_of(&self, value: Syntax, span: &Span) -> Syntax {
+        if !self.in_transformer {
+            return value;
+        }
+        let s = *span;
+        let sym = |name| self.make_symbol(name, s);
+        let is_syntax = self.make_list(
+            vec![
+                sym("%eq"),
+                self.make_list(vec![sym("type-of"), sym("spread")], s),
+                Syntax::keyword(&self.arena(), "syntax", s),
+            ],
+            s,
+        );
+        let children = self.make_list(vec![sym("syntax/children"), sym("spread")], s);
+        let choice = self.make_list(vec![sym("if"), is_syntax, children, sym("spread")], s);
+        let binding = Syntax::array(&self.arena(), &[sym("spread"), value], s);
+        self.make_list(vec![sym("let"), binding, choice], s)
+    }
+
+    /// `(constructor item …)` over a list or array template's items. An
+    /// unquote-splice at level one spreads its value into the call, which
+    /// takes a list, an array or an `@array`.
+    fn constructor_call(
+        &mut self,
+        constructor: &str,
         items: &[Syntax],
         depth: usize,
         span: &Span,
         symbols: &mut SymbolTable,
         vm: &mut VM,
     ) -> Result<Syntax, String> {
-        let mut array_call = vec![self.make_symbol("array", *span)];
+        let mut call = vec![self.make_symbol(constructor, *span)];
         for item in items {
-            array_call.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
-        }
-        Ok(self.make_list(array_call, *span))
-    }
-
-    /// Convert a quasiquoted list to code
-    pub(super) fn quasiquote_list_to_code(
-        &mut self,
-        items: &[Syntax],
-        depth: usize,
-        span: &Span,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<Syntax, String> {
-        if items.is_empty() {
-            return Ok(self.make_list(
-                vec![
-                    self.make_symbol("quote", *span),
-                    self.make_list(vec![], *span),
-                ],
-                *span,
-            ));
-        }
-
-        // Check if any element is unquote-splicing
-        let has_splice = items
-            .iter()
-            .any(|item| matches!(item.kind, SyntaxKind::UnquoteSplicing(_)));
-
-        if has_splice {
-            // Need to use append for splicing
-            let mut segments = Vec::new();
-            let mut current_segment = Vec::new();
-
-            for item in items {
-                if let SyntaxKind::UnquoteSplicing(inner) = &item.kind {
-                    // Flush current segment
-                    if !current_segment.is_empty() {
-                        let mut list_call = vec![self.make_symbol("list", *span)];
-                        list_call.append(&mut current_segment);
-                        segments.push(self.make_list(list_call, *span));
-                    }
-                    // Add spliced expression
-                    if depth == 1 {
-                        segments.push(self.expand(**inner, symbols, vm)?);
-                    } else {
-                        segments.push(self.quasiquote_to_code(
-                            inner,
-                            depth - 1,
-                            span,
-                            symbols,
-                            vm,
-                        )?);
-                    }
-                } else {
-                    current_segment.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
+            call.push(match &item.kind {
+                SyntaxKind::UnquoteSplicing(inner) if depth == 1 => {
+                    let value = self.expand(**inner, symbols, vm)?;
+                    let spread = self.spread_of(value, span);
+                    Syntax::new(SyntaxKind::Splice(self.arena().node(spread)), *span)
                 }
-            }
-
-            // Flush remaining segment
-            if !current_segment.is_empty() {
-                let mut list_call = vec![self.make_symbol("list", *span)];
-                list_call.extend(current_segment);
-                segments.push(self.make_list(list_call, *span));
-            }
-
-            // Build nested binary append calls: (append seg1 (append seg2 (append seg3 ...)))
-            // append is now binary, so we need to nest the calls
-            let mut result = segments
-                .pop()
-                .unwrap_or(self.make_list(vec![self.make_symbol("list", *span)], *span));
-            while let Some(seg) = segments.pop() {
-                result =
-                    self.make_list(vec![self.make_symbol("append", *span), seg, result], *span);
-            }
-            Ok(result)
-        } else {
-            // Simple case - just use list
-            let mut list_call = vec![self.make_symbol("list", *span)];
-            for item in items {
-                list_call.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
-            }
-            Ok(self.make_list(list_call, *span))
+                SyntaxKind::UnquoteSplicing(inner) => {
+                    self.level_form("unquote-splicing", inner, depth - 1, span, symbols, vm)?
+                }
+                _ => self.quasiquote_to_code(item, depth, span, symbols, vm)?,
+            });
         }
+        Ok(self.make_list(call, *span))
     }
 }

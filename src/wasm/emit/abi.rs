@@ -92,6 +92,8 @@ pub(in crate::wasm) enum DataOp {
     IntrBytesPushOp = 35,
     MatchFail = 36,
     ArrayMutSliceFrom = 37,
+    SyntaxView = 38,
+    StructHasKey = 39,
 }
 
 // The i32 form each emitter site passes to `rt_data_op`.
@@ -100,6 +102,7 @@ pub(in crate::wasm) const OP_CAR: i32 = DataOp::First as i32;
 pub(in crate::wasm) const OP_CDR: i32 = DataOp::Rest as i32;
 pub(in crate::wasm) const OP_CAR_DESTRUCTURE: i32 = DataOp::FirstDestructure as i32;
 pub(in crate::wasm) const OP_MATCH_FAIL: i32 = DataOp::MatchFail as i32;
+pub(in crate::wasm) const OP_SYNTAX_VIEW: i32 = DataOp::SyntaxView as i32;
 pub(in crate::wasm) const OP_CDR_DESTRUCTURE: i32 = DataOp::RestDestructure as i32;
 pub(in crate::wasm) const OP_CAR_OR_NIL: i32 = DataOp::FirstOrNil as i32;
 pub(in crate::wasm) const OP_CDR_OR_NIL: i32 = DataOp::RestOrNil as i32;
@@ -111,6 +114,7 @@ pub(in crate::wasm) const OP_ARRAY_REF_DESTRUCTURE: i32 = DataOp::ArrayRefDestru
 pub(in crate::wasm) const OP_ARRAY_SLICE_FROM: i32 = DataOp::ArraySliceFrom as i32;
 pub(in crate::wasm) const OP_ARRAY_MUT_SLICE_FROM: i32 = DataOp::ArrayMutSliceFrom as i32;
 pub(in crate::wasm) const OP_STRUCT_GET_OR_NIL: i32 = DataOp::StructGetOrNil as i32;
+pub(in crate::wasm) const OP_STRUCT_HAS_KEY: i32 = DataOp::StructHasKey as i32;
 pub(in crate::wasm) const OP_STRUCT_GET_DESTRUCTURE: i32 = DataOp::StructGetDestructure as i32;
 pub(in crate::wasm) const OP_ARRAY_EXTEND: i32 = DataOp::ArrayExtend as i32;
 pub(in crate::wasm) const OP_ARRAY_PUSH: i32 = DataOp::ArrayPush as i32;

@@ -38,6 +38,7 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::IsStructMut { dst, .. }
         | I::IsSet { dst, .. }
         | I::IsSetMut { dst, .. }
+        | I::SyntaxView { dst, .. }
         | I::ArrayMutLen { dst, .. }
         | I::MakeCaptureCell { dst, .. }
         | I::LoadCaptureCell { dst, .. }
@@ -48,6 +49,7 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::ArraySliceFrom { dst, .. }
         | I::ArrayMutSliceFrom { dst, .. }
         | I::StructGetOrNil { dst, .. }
+        | I::StructHasKey { dst, .. }
         | I::StructGetDestructure { dst, .. }
         | I::StructRest { dst, .. }
         | I::FirstOrNil { dst, .. }
@@ -133,6 +135,7 @@ pub(super) fn expected_uses(i: &InstrRef<'_>) -> Vec<Reg> {
         | I::IsStructMut { src, .. }
         | I::IsSet { src, .. }
         | I::IsSetMut { src, .. }
+        | I::SyntaxView { src, .. }
         | I::ArrayMutLen { src, .. }
         | I::MatchFail { src, .. }
         | I::FirstDestructure { src, .. }
@@ -141,6 +144,7 @@ pub(super) fn expected_uses(i: &InstrRef<'_>) -> Vec<Reg> {
         | I::ArraySliceFrom { src, .. }
         | I::ArrayMutSliceFrom { src, .. }
         | I::StructGetOrNil { src, .. }
+        | I::StructHasKey { src, .. }
         | I::StructGetDestructure { src, .. }
         | I::StructRest { src, .. }
         | I::FirstOrNil { src, .. }

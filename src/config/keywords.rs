@@ -1,11 +1,12 @@
-// audited: 2026-10-06
+// audited: 2026-11-27
 //! Trace and dump keyword tables and their bit encodings.
+//!
+//! docs/analysis/debugging.md
 
 // ── Trace keywords ────────────────────────────────────────────────
 
-/// All known trace keywords. Unknown keywords in `--trace=` are rejected;
-/// unknown keywords in Elle `(put (vm/config) :trace ...)` are accepted
-/// silently (forward compat for :spirv, :mlir, :gpu).
+/// All known trace keywords. `--trace=` refuses any other keyword, and
+/// `vm/config-set :trace` accepts any keyword.
 pub const TRACE_KEYWORDS: &[&str] = &[
     "call",
     "signal",
@@ -28,7 +29,8 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "rc",
     "regions",
     "anf",
-    "pages", // Future: accepted without error
+    "pages",
+    // Future GPU backends: accepted, and nothing traces them yet.
     "spirv",
     "mlir",
     "gpu",
@@ -50,7 +52,7 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "park",
     // JIT diagnostics: force synchronous Cranelift compilation on the VM
     // thread instead of the background `elle-jit` worker (see
-    // src/vm/jit_entry.rs `submit_jit_task`). Splits install-race bugs from
+    // src/vm/jit_queue.rs). Splits install-race bugs from
     // codegen bugs: a failure that persists under `syncjit` is in codegen or
     // its inputs; one that vanishes lives at the worker boundary.
     "syncjit",

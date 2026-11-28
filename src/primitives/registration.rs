@@ -59,6 +59,7 @@ pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     math::PRIMITIVES,
     memory::PRIMITIVES,
     meta::PRIMITIVES,
+    meta::node::PRIMITIVES,
     modules::PRIMITIVES,
     net::PRIMITIVES,
     unix::PRIMITIVES,

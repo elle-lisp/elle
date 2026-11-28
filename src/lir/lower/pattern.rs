@@ -8,6 +8,7 @@
 //! and `keyed` lower a pattern directly, for the sequential `match` a
 //! suspending guard forces.
 
+use super::access::Viewed;
 use super::*;
 use crate::hir::decision::{AccessPath, Constructor, DecisionTree};
 use crate::hir::{HirPattern, PatternLiteral};
@@ -26,7 +27,8 @@ mod seq;
 /// docs/impl/region/rules.md
 pub(super) fn access_is_borrowed_element(access: &AccessPath) -> bool {
     match access {
-        AccessPath::Root => false,
+        // A key's presence is a boolean, never an element.
+        AccessPath::Root | AccessPath::Has(..) => false,
         AccessPath::First(_inner) | AccessPath::Rest(_inner) => true,
         AccessPath::Index(_inner, _) | AccessPath::Key(_inner, _) => true,
         // Slice/StructRest mint a fresh owned container — a path through
@@ -148,7 +150,7 @@ impl<'a> Lowerer<'a> {
 
     // ── Decision tree lowering ─────────────────────────────────────
 
-    /// Emit the no-match path: raise :match-error carrying the scrutinee.
+    /// Emit the no-match path: signal :match-error carrying the scrutinee.
     /// The store and jump after MatchFail are NOT dead, because errors are
     /// resumable. A fiber that catches SIG_ERROR resumes here with the
     /// handler's value pushed. The store makes that value the match
@@ -182,10 +184,10 @@ impl<'a> Lowerer<'a> {
     fn bind_tree_bindings(
         &mut self,
         bindings: &[(Binding, AccessPath)],
-        scrutinee_slot: u16,
+        viewed: &Viewed,
     ) -> Result<(), String> {
         for (binding, access) in bindings {
-            let val_reg = self.load_access_path(access, scrutinee_slot)?;
+            let val_reg = self.load_access_path(access, viewed)?;
             // A rest name reached through a slice or `StructRest` step takes
             // the release route `park_rest_collection` records.
             let val_reg = if access_builds_a_collection(access) {
@@ -231,18 +233,20 @@ impl<'a> Lowerer<'a> {
         &mut self,
         tree: &DecisionTree,
         arms: &[(HirPattern, Option<Hir>, Hir)],
-        scrutinee_slot: u16,
+        viewed: &mut Viewed,
         result_slot: u16,
         done_label: Label,
         lowered_arms: &mut std::collections::HashMap<usize, Label>,
     ) -> Result<(), String> {
         match tree {
-            DecisionTree::Fail => self.emit_no_match(scrutinee_slot, result_slot, done_label),
+            DecisionTree::Fail => {
+                self.emit_no_match(viewed.scrutinee_slot, result_slot, done_label)
+            }
             DecisionTree::Leaf {
                 arm_index,
                 bindings,
             } => {
-                self.bind_tree_bindings(bindings, scrutinee_slot)?;
+                self.bind_tree_bindings(bindings, viewed)?;
 
                 // If this arm's body was already lowered (e.g., multiple cases
                 // in an or-pattern reaching the same arm), jump to the existing
@@ -278,7 +282,7 @@ impl<'a> Lowerer<'a> {
                 bindings,
                 otherwise,
             } => {
-                self.bind_tree_bindings(bindings, scrutinee_slot)?;
+                self.bind_tree_bindings(bindings, viewed)?;
                 // Evaluate guard
                 let guard_expr = arms[*arm_index]
                     .1
@@ -306,7 +310,7 @@ impl<'a> Lowerer<'a> {
                 self.lower_decision_tree(
                     otherwise,
                     arms,
-                    scrutinee_slot,
+                    viewed,
                     result_slot,
                     done_label,
                     lowered_arms,
@@ -317,16 +321,23 @@ impl<'a> Lowerer<'a> {
                 cases,
                 default,
             } => {
-                // Load value at access path, store to temp slot, then pop
-                // from the operand stack.  The value lives in the local
-                // slot and is reloaded via LoadLocal for each constructor
-                // test.
-                let value_reg = self.load_access_path(access, scrutinee_slot)?;
+                // Load the value at the access path and store its view to a
+                // temp slot, then pop it from the operand stack. The view is
+                // reloaded via LoadLocal for each constructor test, and every
+                // access in the subtree steps into it.
+                // A key's presence is a boolean, so it has no view to take.
+                let value_reg = self.load_access_path(access, viewed)?;
+                let value_reg = if matches!(access, AccessPath::Has(..)) {
+                    value_reg
+                } else {
+                    self.emit_syntax_view(value_reg)
+                };
                 let temp_slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
+                viewed.push(access, temp_slot);
 
                 let default_label = self.fresh_label();
 
@@ -360,7 +371,7 @@ impl<'a> Lowerer<'a> {
                     self.lower_decision_tree(
                         subtree,
                         arms,
-                        scrutinee_slot,
+                        viewed,
                         result_slot,
                         done_label,
                         lowered_arms,
@@ -378,15 +389,16 @@ impl<'a> Lowerer<'a> {
                     self.lower_decision_tree(
                         def,
                         arms,
-                        scrutinee_slot,
+                        viewed,
                         result_slot,
                         done_label,
                         lowered_arms,
                     )?;
                 } else {
                     // No default → no constructor matched the scrutinee
-                    self.emit_no_match(scrutinee_slot, result_slot, done_label)?;
+                    self.emit_no_match(viewed.scrutinee_slot, result_slot, done_label)?;
                 }
+                viewed.pop();
 
                 Ok(())
             }

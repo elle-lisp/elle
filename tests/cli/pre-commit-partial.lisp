@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-25
 ## A partial commit takes a Lisp file the hook leaves alone, and refuses one it changed, keeping the real index at HEAD.
 ## tests/cli/overview.md
 ## CONTRIBUTING.md
@@ -68,9 +68,9 @@
   # refuses until the author names it too.
   (eprintln "scenario: a partial commit refuses an index the generator rewrote")
   (let [r (scratch-repo dir "partial-agents")]
-    (repo-seed r "AGENTS.md" "old\n")
+    (repo-seed r "AGENTS.md" (generated "old"))
     (repo-seed r "f.lisp" (formatted tidy))
-    (repo-write r "AGENTS.next" "new\n")
+    (repo-write r "AGENTS.next" (generated "new"))
     (repo-write r "f.lisp" (formatted other))
     (let [out (repo-commit r ["--" "f.lisp"])]
       (assert (not (= out:exit 0))
@@ -81,8 +81,25 @@
     (let [out (repo-commit r ["--" "f.lisp" "AGENTS.md"])]
       (assert (= out:exit 0)
               (string "naming the index commits it: " (transcript out))))
-    (assert (= (repo-head r "AGENTS.md") "new\n")
+    (assert (= (repo-head r "AGENTS.md") (generated "new"))
             "HEAD holds the regenerated index")
-    (at-head r)))
+    (at-head r))
+
+  # The counter-factual: a hook that holds every modified AGENTS.md for its
+  # refusal refuses a partial commit that never named the guide.
+  (eprintln "scenario: a partial commit leaves a hand-written guide alone")
+  (let [r (scratch-repo dir "partial-guide")]
+    (repo-seed r "m/AGENTS.md" (guide "old"))
+    (repo-seed r "f.lisp" (formatted tidy))
+    (repo-write r "m/AGENTS.md" (guide "new"))
+    (repo-write r "f.lisp" (formatted other))
+    (let [out (repo-commit r ["--" "f.lisp"])]
+      (assert (= out:exit 0) (string "the commit failed: " (transcript out))))
+    (assert (= (repo-head r "f.lisp") (formatted other)) "HEAD holds the change")
+    (assert (= (repo-head r "m/AGENTS.md") (guide "old"))
+            "HEAD keeps the guide as it was")
+    (at-head r)
+    (assert (= (repo-read r "m/AGENTS.md") (guide "new"))
+            "the disk keeps the author's edit")))
 
 (eprintln "all pre-commit-partial scenarios passed")

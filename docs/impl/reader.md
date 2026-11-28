@@ -1,6 +1,6 @@
 # Reader
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-24 -->
 
 The reader transforms s-expression source, or the code fences of a literate document, into syntax trees.
 
@@ -66,7 +66,8 @@ for `.md` files, where blank-line padding preserves line numbers.
 `SyntaxReader` ([syntax.rs](../../src/reader/syntax.rs)) builds `Syntax`
 trees from tokens. A `Syntax` node carries a `SyntaxKind` (symbol, keyword,
 integer, list, array, struct, set, etc.) plus a `Span` for error
-reporting.
+reporting. A list that spells out a quoting form reads as the node its prefix
+builds ([impl/syntax.md](syntax.md)).
 
 At end of input inside an unfinished collection, the error points to the
 outermost unclosed collection, names its type, and counts every collection

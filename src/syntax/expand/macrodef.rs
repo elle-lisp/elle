@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-24
 //! A macro definition: its name, its parameter lists, its template, and the
 //! cell that caches its compiled transformer.
 //!
@@ -119,6 +119,7 @@ impl TransformerCell {
     pub(crate) unsafe fn fill(&self, heap: *mut FiberHeap, value: Value) {
         debug_assert!(self.get().is_none(), "a transformer cell is filled once");
         self.0.release();
+        crate::value::arena::hold_transformer(&mut *heap, value);
         self.0.filled.set(Some(Filled { value, heap }));
     }
 
@@ -147,9 +148,7 @@ impl Slot {
         if let Some(Filled { value, heap }) = self.filled.take() {
             // Safe: `fill`'s contract keeps the heap alive while a clone of
             // the cell holds a transformer on it.
-            let heap = unsafe { &mut *heap };
-            let region = crate::value::arena::region_of(heap, value);
-            crate::value::arena::decref_region(heap, region);
+            crate::value::arena::release_transformer(unsafe { &mut *heap }, value);
         }
     }
 }

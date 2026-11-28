@@ -1,5 +1,5 @@
-// audited: 2026-11-25
-//! The struct and array opcodes of destructuring, and the splice builders: keyed reads, rests, safe reads, extend and push.
+// audited: 2026-11-26
+//! The struct and array opcodes of destructuring, and the splice builders: keyed reads, key presence, rests, safe reads, extend and push.
 //!
 //! docs/impl/vm.md
 
@@ -47,6 +47,25 @@ pub(crate) fn handle_struct_get_or_nil(
     }
     // Not found or wrong type → nil
     vm.fiber.stack.push(Value::NIL);
+}
+
+/// Whether a struct or @struct holds a key, a key that holds nil included;
+/// false for any other value. Used by match, and never signals.
+/// Operand: u16 constant pool index (keyword or symbol key).
+pub(crate) fn handle_struct_has_key(
+    vm: &mut VM,
+    bytecode: &[u8],
+    ip: &mut usize,
+    constants: &[Value],
+) {
+    let const_idx = vm.read_u16(bytecode, ip) as usize;
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on StructHasKey");
+    let held = val.struct_holds_key(constants[const_idx]);
+    vm.fiber.stack.push(Value::bool(held));
 }
 
 /// Table/struct get for destructuring: signals error if key missing or wrong type.

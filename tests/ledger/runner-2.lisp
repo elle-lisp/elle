@@ -1,4 +1,4 @@
-(elle/epoch 18)
+(elle/epoch 19)
 # audited: 2026-11-24
 # The runner's charge ledger, part 2 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
@@ -97,7 +97,7 @@
 ["tests/lang/lexical-scope.lisp" :objects 23]
 ["tests/lang/lint-rules.lisp" :objects 23]
 ["tests/lang/macro-rest.lisp" :objects 23]
-["tests/lang/macros.lisp" :objects 41]
+["tests/lang/macros.lisp" :objects 35]
 ["tests/lang/mask-exec-routes.lisp" :objects 23]
 ["tests/lang/match-guards.lisp" :objects 23]
 ["tests/lang/match-or.lisp" :objects 23]

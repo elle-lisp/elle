@@ -1,15 +1,15 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-11-26 -->
+<!-- audited: 2026-11-27 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
 
 A build fixes the runtime a program runs on: which optimizing tier it carries,
 and which I/O backend. The command line sets what a user may reasonably
-change per run — tracing, dumps, paths and caches — and no flag chooses a
-tier. A running program reads the rest through `vm/config` and
-changes a few settings through `vm/config-set`.
+change per run: tracing, dumps, paths, caches, and when the JIT compiles. A
+running program reads the rest through `vm/config` and changes a few settings
+through `vm/config-set`.
 
 ## Builds
 
@@ -17,7 +17,7 @@ A build carries at most one optimizing tier, and the cargo features pick it:
 
 | Feature | Default | What it adds |
 |---------|---------|--------------|
-| `jit` | on | The Cranelift JIT, the tier of the default build |
+| `jit` | on | The Cranelift JIT, the tier of the default build. Where it is the tier, it adds `--jit=` |
 | `mlir` | off | The MLIR tier. It replaces the JIT: an `mlir` build runs no JIT |
 | `wasm` | off | The WebAssembly backend. It replaces both, and adds `--wasm=` |
 | `ffi` | on | C interop through libffi |
@@ -26,14 +26,14 @@ A build carries at most one optimizing tier, and the cargo features pick it:
 
 The precedence is `wasm`, then `mlir`, then `jit`: a build with more than one
 of the three runs the first it carries. A tier compiles a function once the
-function has been called ten times; `vm/config` reads and sets that threshold
-(below).
+function has been called ten times. `vm/config` reads and sets that threshold
+(below), and `--jit=` sets the JIT's for one run.
 
 A build is one implementation of Elle, and every build must pass the language
-suite ([spec](spec.md)). There is therefore no flag that chooses a tier or a
-backend. A user who wants the interpreter alone builds without the `jit`
-feature. Two programs can switch a tier off or make it eager: the rig, for one
-implementation test ([rig](../rig/overview.md)), and `elle test`
+suite with no flag ([spec](spec.md)). No flag chooses a tier or a backend.
+`--jit=` changes only when the JIT of a JIT build compiles, or turns it off.
+At run time, two programs can switch a tier off or make it eager: the rig, for
+one implementation test ([rig](../rig/overview.md)), and `elle test`
 ([test-runner](test-runner.md)). A user program cannot.
 
 No primitive of a user build names the build; the rig's `(elle/build)` does
@@ -87,68 +87,10 @@ One number feeds every surface that names a version: `[package] version` in
 `--version`, the `--help` banner, the REPL greeting and the language server's
 `serverInfo` all render that constant.
 
-### Trace flags
+### Tracing
 
-`--trace` takes a comma-separated list of trace keywords:
-
-```bash
-elle --trace=call script.lisp        # trace function calls
-elle --trace=call,signal script.lisp # trace calls and signals
-elle --trace=all script.lisp         # trace everything
-```
-
-Available trace keywords:
-
-| Keyword | Description |
-|---------|-------------|
-| `:call` | Function calls: name, arg count, dispatch decision |
-| `:signal` | Signal dispatch: bits received, squelch, capability denial |
-| `:compile` | Compilation: phase entry/exit with timing |
-| `:fiber` | Fiber operations: resume, swap, status transitions |
-| `:hir` | HIR analysis: binding resolution, signal inference |
-| `:lir` | LIR lowering: slot allocation, capture cells |
-| `:emit` | Bytecode emission |
-| `:jit` | JIT compilation: decisions, rejections, batch compilation |
-| `:io` | I/O operations |
-| `:import` | Plugin loads: the path each `import/load-plugin` call loads |
-| `:macro` | Macro expansion |
-| `:wasm` | WASM backend: host calls, compilation |
-| `:capture` | Capture analysis decisions |
-| `:arena` | Heap allocation, region enter/exit |
-| `:escape` | Escape analysis decisions |
-| `:bytecode` | Bytecode dump before execution |
-| `:posix` | POSIX-signal subsystem (os/sig-* primitives, signalfd/kqueue) |
-| `:chan` | Channel wake protocol (register/deregister, send wake) |
-| `:rc` | Reference-count operations on regions |
-| `:regions` | Region inference and lifetime decisions |
-| `:anf` | A-normal form lift pass |
-| `:pages` | Region page allocation |
-| `:boot` | Boot-sequence timing: primitive registration, core, prelude, stdlib compile/execute, the boot image's hydrate and store, and whether the embedded blob was mapped or copied (string-traced, no bit) |
-| `:census` | Post-boot heap census: per-tag object counts and bytes, capture cells, pointer-slot density, unsealed variants (string-traced, no bit; see [sealing.md](impl/image/sealing.md)) |
-| `:free` | Region free diagnostics (string-traced, no bit) |
-| `:guardfree` | Guarded-free diagnostics (string-traced, no bit) |
-| `:freebt` | Free backtrace diagnostics (string-traced, no bit) |
-| `:scrub` | Zero a freed page's body so a stale deref lands on a tag no live value carries (string-traced, no bit) |
-| `:residue` | Teardown leak dump: the surviving regions and their cross-region edges (string-traced, no bit) |
-| `:park` | Park and resume diagnostics: every suspended-frame park and every frame replay, with the frame's shape (string-traced, no bit) |
-| `:syncjit` | Compile with Cranelift on the VM thread instead of the background worker (string-traced, no bit) |
-
-The CLI rejects unknown keywords and lists valid names in the error. Elle code
-can still set unknown trace keywords for forward compatibility.
-
-Each trace line goes to stderr as `[trace:KEYWORD] message`.
-
-### Old flags (aliases)
-
-Elle keeps the old `--debug-*` flags as aliases:
-
-| Old flag | Equivalent |
-|----------|-----------|
-| `--debug` | `--trace=bytecode` |
-| `--debug-jit` | `--trace=jit` |
-| `--debug-resume` | `--trace=fiber` |
-| `--debug-stack` | `--trace=call` |
-| `--debug-wasm` | `--trace=wasm` |
+`--trace=` and its `--debug-*` aliases log what a subsystem does
+([debugging](analysis/debugging.md)).
 
 ### Statistics
 
@@ -169,6 +111,26 @@ source locations, region tables, and yield, call and charge sites. Two runs
 over one file print one text, so a recorded dump is a golden.
 `make bytecode-golden` records it for the corpus and the standard library, and
 `make bytecode-golden-check` compares the current binary against the record.
+
+### JIT policy
+
+A build whose tier is the JIT takes `--jit=`; no other build accepts the flag.
+
+```bash
+elle --jit=off script.lisp          # the interpreter runs every function
+elle --jit=0 script.lisp            # compile each function at its first call
+elle --jit=10 script.lisp           # compile each function after ten calls (default)
+```
+
+| Policy | CLI | `(vm/config :jit)` | Behavior |
+|--------|-----|--------------------|----------|
+| Off | `--jit=off` | `nil` | The interpreter runs every function |
+| Eager | `--jit=0` | `0` | Each function compiled at its first call |
+| Adaptive | `--jit=N` | `N` | Each function compiled once it has been called N times; the default N is 10 |
+
+`--jit=` refuses any other value, and the error names it. An eager run compiles
+every function it calls, the scheduler's included, so a short program spends
+most of its time in Cranelift ([jit](impl/jit.md)).
 
 ### WASM policy
 
@@ -269,14 +231,14 @@ compiles its boot sources.
 (assert (contains? |"so" "dylib" "dll"| (vm/config :plugin-suffix)))
 ```
 
-`:jit` answers the number of calls after which the JIT compiles a function,
-or nil when this build carries no JIT or the JIT is off. `:mlir` answers the
-same for the MLIR tier. A `wasm` build answers `:wasm` with its policy
-keyword, and no other build knows the key.
+`:jit` answers the number of calls after which the JIT compiles a function: 0
+when it is eager, and nil when this build carries no JIT or the JIT is off.
+`:mlir` answers the same for the MLIR tier. A `wasm` build answers `:wasm` with
+its policy keyword, and no other build knows the key.
 
 ```lisp
 (let [jit (vm/config :jit)]
-  (assert (or (nil? jit) (> jit 0)) "a JIT threshold is a positive count"))
+  (assert (or (nil? jit) (>= jit 0)) "a JIT threshold is a count of calls"))
 ```
 
 ### The depth cap
@@ -326,15 +288,6 @@ with an `:argument-error`.
   (assert (= (get err :error) :type-error)))
 ```
 
-### Future feature flags
-
-A trace set accepts the following keywords without error, for forward
-compatibility:
-
-- `:spirv` — SPIR-V shader compilation
-- `:mlir` — MLIR compilation tier
-- `:gpu` — GPU offloading
-
 ## Implementation
 
 `RuntimeConfig` is stored on the VM struct (not in a global static), so each
@@ -346,8 +299,6 @@ For hot paths (VM dispatch loop), trace keywords are mirrored in a shared
 atomic bitfield, the instance's `TraceCell`, to avoid set lookups on every
 instruction.
 
-An embedding host builds a `Config` itself, so the policies a user build does
-not expose are reachable from Rust: `JitPolicy::Off` and `JitPolicy::Eager`
-are what the rig sets for a sidecar that asks for them. `GraftPolicy::Off` is
-another, and keeps every call a call in the units an instance compiles after
-its boot ([grafting a call](impl/graft.md)).
+An embedding host builds a `Config` itself, so a policy no flag sets is
+reachable from Rust. `GraftPolicy::Off` is one, and keeps every call a call in
+the units an instance compiles after its boot ([grafting a call](impl/graft.md)).

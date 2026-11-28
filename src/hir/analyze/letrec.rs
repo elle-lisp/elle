@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! The `letrec` binding form: pre-bind every name, then analyze the initializers in order and the body last.
 //!
 //! docs/bindings.md
@@ -126,7 +126,7 @@ impl<'a> Analyzer<'a> {
                 let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let sym = self.symbols.intern(name);
                 duplicates.check(sym, name, name_syn.scopes.as_slice(), &name_syn.span)?;
-                let b = self.bind(name, name_syn.scopes.as_slice(), BindingScope::Local);
+                let b = self.bind_written(name, name_syn, BindingScope::Local);
                 let fn_depth = self.fn_depth;
                 let inner = self.arena.get_mut(b);
                 inner.is_prebound = true;

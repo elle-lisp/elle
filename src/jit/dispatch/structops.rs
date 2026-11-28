@@ -1,5 +1,5 @@
-// audited: 2026-10-22
-//! The JIT's struct access helpers: a keyed read that answers nil, a keyed read that signals, and the rest of a struct.
+// audited: 2026-11-24
+//! The JIT's struct access helpers: a keyed read that answers nil, a key's presence, a keyed read that signals, and the rest of a struct.
 //!
 //! docs/impl/jit.md
 
@@ -37,6 +37,26 @@ pub extern "C" fn elle_jit_struct_get_or_nil(
         }
     }
     JitValue::nil()
+}
+
+/// Whether a struct or @struct holds a key, a key that holds nil included;
+/// false for any other value. Never signals.
+#[no_mangle]
+pub extern "C" fn elle_jit_struct_has_key(
+    src_tag: u64,
+    src_payload: u64,
+    key_tag: u64,
+    key_payload: u64,
+) -> JitValue {
+    let val = Value {
+        tag: src_tag,
+        payload: src_payload,
+    };
+    let key = Value {
+        tag: key_tag,
+        payload: key_payload,
+    };
+    JitValue::from_value(Value::bool(val.struct_holds_key(key)))
 }
 
 /// Struct/table get for destructuring: returns value for key, signals error if missing.

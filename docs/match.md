@@ -1,11 +1,11 @@
 # Pattern Matching
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-24 -->
 
 `match` dispatches on the structure and value of data. Arms are tried
 top to bottom; the first pattern that matches (and whose guard, if any,
-passes) selects the body. If no arm matches, a runtime `:match-error`
-is raised carrying the unmatched value. A catch-all final arm — a
+passes) selects the body. If no arm matches, `match` signals a
+`:match-error` that carries the unmatched value. A catch-all final arm — a
 wildcard (`_`) or a variable pattern — is idiomatic when a fallback
 makes sense, but it is not required: omitting it means "no other value
 can reach this match", and the runtime error enforces that claim.
@@ -28,6 +28,23 @@ Literal values (numbers, keywords, strings, booleans) match by equality:
 (assert (= (describe 0) "zero"))
 (assert (= (describe 1) "one"))
 (assert (= (describe 42) "other"))
+```
+
+A quoted symbol matches that symbol, and compares by name:
+
+```lisp
+(defn head [form]
+  (match form
+    ('if c t e)  :if
+    ('if c t)    :one-armed
+    (h & _)      :call
+    _            :atom))
+
+(assert (= (head '(if a b c)) :if))
+(assert (= (head '(if a b)) :one-armed))
+(assert (= (head '(when a b)) :call))
+(assert (= (match 'x 'x :x _ :other) :x))
+(assert (= (match "x" 'x :x _ :other) :other))
 ```
 
 ## Binding patterns
@@ -106,6 +123,25 @@ Struct patterns match by key, with literal values for dispatch:
 
 (assert (= (area {:type :circle :radius 5}) 78.53975))
 (assert (= (area {:type :square :side 7}) 49))
+```
+
+A struct pattern matches only a struct that holds every key the pattern
+names. A key that holds `nil` is present. A key the pattern does not name may
+hold anything, so `{}` matches every struct. An `@struct` pattern works the
+same way.
+
+```lisp
+(defn radius [shape]
+  (match shape
+    {:radius r} r
+    {}          :no-radius
+    _           :not-a-struct))
+
+(assert (= (radius {:radius 5}) 5))
+(assert (= (radius {:side 7}) :no-radius))
+(assert (nil? (radius {:radius nil})))
+(assert (= (radius 7) :not-a-struct))
+(assert (= (match @{:a 1} @{:b _} :b @{} :other) :other))
 ```
 
 ## Nested patterns
@@ -208,7 +244,7 @@ guard before the match moves on to the next arm:
 
 ## No matching arm
 
-When no arm matches, `match` raises a `:match-error` carrying the
+When no arm matches, `match` signals a `:match-error` carrying the
 unmatched value. Catch it with `protect` (or a `try` handler) like any
 other error:
 
@@ -281,6 +317,11 @@ make later ones dead: a failed guard retries the remaining alternatives
 the second alternative is reachable through guard fallthrough. Coverage
 by earlier *arms* still applies to guarded arms as usual.
 
+## Syntax objects
+
+A macro's transformer matches a syntax object as the data its node holds, and
+a name binds the node itself ([macros/syntax.md](macros/syntax.md)).
+
 ## match vs case vs cond
 
 | | `match` | `case` | `cond` |
@@ -321,7 +362,7 @@ by earlier *arms* still applies to guarded arms as usual.
 
 When `cond` branches are all testing the same expression against literal
 values, `match` is more concise: it rejects unreachable arms at compile
-time and raises a `:match-error` at runtime when no arm covers the value,
+time and signals a `:match-error` at runtime when no arm covers the value,
 instead of silently falling through. See [control.md](control.md) for
 `cond` and `case`.
 

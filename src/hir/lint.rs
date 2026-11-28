@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! The HIR linter: walks an analyzed tree and calls each rule where its form appears.
 //!
 //! docs/cookbook/lint-rules.md
@@ -27,9 +27,10 @@ pub struct HirLinter {
     /// binding, which no name comparison can decide once a name is shadowed.
     current_fn_binding: Option<Binding>,
     /// Every binding with at least one use, over the whole tree handed to
-    /// [`lint`](Self::lint). Read by the unused-binding rule. Collected up front
-    /// because a use may appear anywhere — including textually before the
-    /// binding, in a `letrec` — so the single-pass walk cannot decide it.
+    /// [`lint`](Self::lint), and every copy of one. Read by the unused-binding
+    /// rule. Collected up front because a use may appear anywhere — including
+    /// textually before the binding, in a `letrec` — so the single-pass walk
+    /// cannot decide it.
     used: HashSet<Binding>,
 }
 
@@ -56,7 +57,7 @@ impl HirLinter {
     pub fn lint(&mut self, hir: &Hir, symbols: &SymbolTable, arena: &BindingArena) {
         let mut defuse = DefUseBuilder::new();
         defuse.walk(hir);
-        self.used = defuse.uses.into_keys().collect();
+        self.used = arena.with_copies(defuse.uses.into_keys().collect());
         let start = self.diagnostics.len();
         self.check(hir, symbols, arena);
         let mut seen = HashSet::new();

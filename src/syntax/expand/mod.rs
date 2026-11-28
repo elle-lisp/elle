@@ -16,6 +16,7 @@ mod include;
 mod introspection;
 mod macro_expand;
 mod macrodef;
+mod prelude;
 mod quasiquote;
 mod scope;
 mod syntaxcase;
@@ -74,6 +75,14 @@ pub struct Expander {
     /// The chain of files being included, which the cycle check reads.
     includes: crate::pipeline::Includes,
     expansion_depth: usize,
+    /// Whether the expander is compiling a transformer or a
+    /// `begin-for-syntax` body: code that runs at expansion and builds code,
+    /// so a quasiquote's template symbols keep their scopes. A clone starts
+    /// outside both.
+    in_transformer: bool,
+    /// The `W006` findings of this expander's expansions. A clone starts
+    /// empty, so a compile reads only its own.
+    findings: Vec<crate::lint::Diagnostic>,
 }
 
 impl Clone for Expander {
@@ -89,6 +98,8 @@ impl Clone for Expander {
             unit: self.unit,
             includes: crate::pipeline::Includes::default(),
             expansion_depth: self.expansion_depth,
+            in_transformer: false,
+            findings: Vec::new(),
         }
     }
 }
@@ -113,7 +124,24 @@ impl Expander {
             unit: Unit::begin(UnitTag::of("<expander>", &[])),
             includes: crate::pipeline::Includes::default(),
             expansion_depth: 0,
+            in_transformer: false,
+            findings: Vec::new(),
         }
+    }
+
+    /// Compile `body` as code that runs at expansion: a transformer's or a
+    /// `begin-for-syntax` definition's. Its quasiquotes build code, and the
+    /// expander's state before the call returns after it.
+    pub(super) fn eval_at_expansion(
+        &mut self,
+        body: Syntax,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<crate::value::Value, String> {
+        let outer = std::mem::replace(&mut self.in_transformer, true);
+        let out = crate::pipeline::eval_syntax(body, self, symbols, vm);
+        self.in_transformer = outer;
+        out
     }
 
     /// Build an expander over `vm`'s heap — the safe form of [`new`](Self::new)
@@ -223,41 +251,10 @@ impl Expander {
         }
     }
 
-    /// Load the standard prelude macros.
-    ///
-    /// Parses and expands `prelude.lisp`, which registers macro
-    /// definitions in this Expander. Must be called after the VM
-    /// has primitives registered but before user code expansion.
-    pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
-        use crate::pipeline::sources::PRELUDE;
-        // The prelude is a compilation unit like any other: its tree lives in
-        // its own working region, and only the macro templates it registers
-        // (copied into the template arena by `handle_defmacro`) outlive it.
-        let heap = vm.heap_ptr;
-        let work = SyntaxArena::mint(unsafe { &mut *heap });
-        let previous = std::mem::replace(&mut self.arena, work);
-        let result = self.load_prelude_into(PRELUDE, symbols, vm);
-        self.arena = previous;
-        unsafe { (*heap).decref_region_if_present(work.region()) };
-        result
-    }
-
-    fn load_prelude_into(
-        &mut self,
-        prelude: &str,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<(), String> {
-        let syntaxes = crate::reader::read_syntax_all(self.arena, prelude, "<internal>")?;
-        self.in_unit(UnitTag::of("<internal>", &syntaxes), |this| {
-            // The primitive scope lets a prelude template's symbols resolve to
-            // primitives even where the call site binds the same names.
-            for syntax in syntaxes {
-                let scoped = this.add_scope_recursive(syntax, ScopeId::PRIMITIVE);
-                this.expand(scoped, symbols, vm)?;
-            }
-            Ok(())
-        })
+    /// Hand over the `W006` findings this expander's expansions made, and
+    /// keep none (docs/cookbook/lint-rules.md).
+    pub(crate) fn take_findings(&mut self) -> Vec<crate::lint::Diagnostic> {
+        std::mem::take(&mut self.findings)
     }
 
     /// Release the region reference each cached transformer holds, and leave
@@ -290,7 +287,7 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<(), String> {
         // Point the transformer-running VM at the table THIS expansion uses, so a
-        // transformer's `gensym`/`syntax->datum`/`read` (via `ctx.vm().symbols()`)
+        // transformer's `gensym`/`syntax/->datum`/`read` (via `ctx.vm().symbols()`)
         // interns into the same table the expander threads. Idempotent across
         // recursion; the table is reborrowed per transformer call, never touched
         // simultaneously (docs/impl/region/ctx.md).
@@ -318,9 +315,9 @@ impl Expander {
                         let args = &items[1..];
                         return self.expand_macro_call(&macro_def, args, &syntax, out, symbols, vm);
                     }
-                    self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List)
+                    self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::list)
                 }
-                None => self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List),
+                None => self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::list),
             },
             SyntaxKind::Array(items) => {
                 self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::Array)

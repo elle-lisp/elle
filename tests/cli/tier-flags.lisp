@@ -1,6 +1,6 @@
-(elle/epoch 18)
-## audited: 2026-11-24
-## The tier a build starts, read back out of a running VM, and the tier flags a user build refuses.
+(elle/epoch 19)
+## audited: 2026-11-27
+## The tier a build starts, the JIT policy `--jit=` sets, each read back out of a running VM, and the flags a build refuses.
 ## tests/cli/overview.md
 ## docs/config.md
 ##
@@ -28,9 +28,10 @@
 (def jit? (carries? ":jit"))
 (def mlir? (carries? ":mlir-cpu"))
 (def wasm? (carries? ":wasm"))
+(def jit-tier? (and jit? (not mlir?) (not wasm?)))
 
 # The default build: the JIT, and neither MLIR nor WebAssembly.
-(when (and jit? (not mlir?) (not wasm?))
+(when jit-tier?
   (eprintln "scenario: the default build reports the JIT threshold")
   (assert (= (reads "(println (vm/config :jit))") "10")
           "the default threshold reads 10")
@@ -44,9 +45,9 @@
   (assert (= (reads "(println (vm/config :mlir))") "nil")
           "a build without MLIR reads nil"))
 
-# The JIT compiles adaptively, and no program chooses another policy. Only the
-# `elle test` process may turn a tier off or make it eager, another keyword is
-# the wrong type, and a count below one names no threshold (docs/config.md).
+# At run time no program chooses another policy. Only the `elle test` process
+# may turn a tier off or make it eager, another keyword is the wrong type, and a
+# count below one names no threshold (docs/config.md).
 (eprintln "scenario: a program cannot turn the JIT off")
 (each [value want] [[":off" "false argument-error"]
                     [":eager" "false argument-error"]
@@ -55,17 +56,55 @@
                             value "))] (println ok? \" \" (get err :error)))"))
              want) (string "a program outside elle test sets :jit " value)))
 
-# A user build has no flag that chooses a tier, a backend or a pass. The
-# counter-factual: a flag that stopped parsing would become the program's name,
-# and the run would read a missing file called `--jit=off`.
+# A user build has no flag that chooses a tier, a backend or a pass, and only a
+# build whose tier is the JIT reads `--jit=`. The counter-factual: a flag that
+# stopped parsing would become the program's name, and the run would read a
+# missing file called `--mlir=off`.
 (eprintln "scenario: a removed flag is refused by name")
-(each flag ["--jit=off" "--jit=eager" "--mlir=off" "--anf=off" "--no-uring"
-            "--stats" "--flip=on" ;(if wasm? [] ["--wasm=full"])]
+(each flag ["--mlir=off" "--anf=off" "--no-uring" "--stats" "--flip=on"
+            ;(if wasm? [] ["--wasm=full"])
+            ;(if jit-tier? [] ["--jit=off" "--jit=0"])]
   (let [r (elle-run [flag "-e" "(println :ran)"])]
     (assert (not (= r:exit 0)) (string "elle " flag " ran: " r:out))
     (assert (and (string/contains? r:err "unknown option")
                  (string/contains? r:err flag))
             (string "elle " flag " names the option it refused: " r:err))))
+
+(defn compiles [flag]
+  "Run a program under FLAG with the JIT compiling on the VM thread, and answer
+   how many compiles its statistics count. A synchronous compile finishes before
+   the program ends, so the count does not race the background worker."
+  (let [r (elle-run [flag "--trace=syncjit" "--dump=stats" "-e" "(+ 1 2)"])
+        marker "compiles: "
+        at (string/find r:err marker)]
+    (assert (= r:exit 0) (string "elle " flag " exited " r:exit ": " r:err))
+    (assert (not (nil? at))
+            (string "elle " flag " printed no compile count: " r:err))
+    (parse-int (first (string/split (slice r:err (+ at (length marker))) " ")))))
+
+# The counter-factual for the readings: a flag that set the configuration the
+# VM never reads. The compile counts show the policy reaches the dispatcher.
+(when jit-tier?
+  (eprintln "scenario: --jit= sets the policy a running VM reads")
+  (each [flag want] [["--jit=off" "nil"] ["--jit=0" "0"] ["--jit=3" "3"]
+                     ["--jit=10" "10"]]
+    (let [r (elle-run [flag "-e" "(println (vm/config :jit))"])]
+      (assert (= r:exit 0) (string "elle " flag " exited " r:exit ": " r:err))
+      (assert (= (string/trim r:out) want)
+              (string "elle " flag " reads " want ", got " r:out))))
+  (eprintln "scenario: --jit=off and a high threshold compile nothing, eager does")
+  (assert (= (compiles "--jit=off") 0) "--jit=off compiles nothing")
+  (assert (= (compiles "--jit=100000") 0)
+          "no function is called 100000 times, so nothing compiles")
+  (assert (> (compiles "--jit=0") 0) "--jit=0 compiles at the first call")
+  (eprintln "scenario: --jit= refuses a value that is no policy, by name")
+  (each value ["eager" "adaptive" "" "-1" "ten" "OFF"]
+    (let [flag (string "--jit=" value)
+          r (elle-run [flag "-e" "(println :ran)"])]
+      (assert (not (= r:exit 0)) (string "elle " flag " ran: " r:out))
+      (assert (and (string/contains? r:err "--jit")
+                   (string/contains? r:err (string "'" value "'")))
+              (string "elle " flag " names the flag and the value: " r:err)))))
 
 (eprintln "scenario: --dump=stats runs the program and reports at its end")
 (let [r (elle-run ["--dump=stats" "-e" "(println :ran)"])]
