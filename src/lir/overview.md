@@ -1,6 +1,6 @@
 # LIR
 
-<!-- audited: 2026-11-26 -->
+<!-- audited: 2026-11-27 -->
 
 The LIR module's types, how a reader walks a frozen function, and the rules every block and register keeps.
 
@@ -48,6 +48,8 @@ The frozen form, which every other reader reads ([code/](code/mod.rs)):
 | `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
 | `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |
 | `SiteRef` | A yield point, a call site or a fuel charge site: the IP the interpreter resumes at, live registers, local count, and whether a resume delivers a value |
+| `SlotRef` | One local slot an instruction names, as a read or a store ([code/slots.rs](code/slots.rs)) |
+| `SlotLiveness`, `LiveSlots` | The local slots live into each block and around each node, and one such set ([code/live.rs](code/live.rs)) |
 | `ChildIndex` | The child-table entry a view's `child_of` names for a `MakeClosure` ([jit-closure.md](../../docs/impl/jit-closure.md)) |
 | `form::instr`, `form::terminator` | An instruction or a terminator in the data form: its kind, and each field of its variant by name ([code/form.rs](code/form.rs)) |
 
@@ -86,6 +88,36 @@ answers the question.
 order, so a node answers exactly the registers its instruction names. The
 encoder's match is exhaustive, so a new variant cannot be emitted until it says
 which operands are uses.
+
+## Local slot liveness
+
+A local slot is live at a point when some path from that point reads the slot
+before a store replaces it. `SlotLiveness::of` answers that for a frozen
+function: the slots live into each block, and the slots live before and after
+each node of a block. A JIT side exit spills the slots live where the
+interpreter resumes, and no others
+([jit-closure.md](../../docs/impl/jit-closure.md)).
+
+`InstrRef::slot_refs` names each local slot an instruction reads or stores.
+Its match is exhaustive, so a new variant cannot compile until it says which
+slots it names.
+
+| Instruction | Reads | Stores |
+|-------------|-------|--------|
+| `LoadLocal` | its slot | |
+| `StoreLocal` | | its slot |
+| `LoadCapture`, `LoadCaptureRaw`, `StoreCapture` | slot `index - num_captures`, where the index lies past the captures and the parameters | |
+| `DecrefPostponed` | `slot` and `route` | |
+| `Call`, `SuspendingCall` | the slot of each move | |
+| `TailCall` | each borrowed-argument slot, and the slot of each late mint | |
+
+A store replaces a slot only where no cell holds the local
+(`capture_locals_mask`). A store to a celled local counts as a read. No
+terminator names a slot. A `Jump` flows into its label, a `Branch` into both
+of its labels, and an `Emit` into its resume block. A `Return` and an
+`Unreachable` flow nowhere, and a tail call ends no block. The analysis
+counts a slot live wherever it cannot prove the slot dead, so it can overstate
+what is live and never understates it.
 
 ## Invariants
 

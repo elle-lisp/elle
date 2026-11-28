@@ -1,6 +1,6 @@
 # An abandoned frame runs the releases it still owes
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-27 -->
 
 The two tables naming what an abandoned frame still owed, and the seams that walk
 them. A call boundary, a refusing host and a discharge share one walk.
@@ -191,8 +191,8 @@ install ([owner.md](owner.md)).
 leaves by an error at the check after a call, after an instruction that may
 raise, and at an `Emit` of `SIG_ERROR`. Each exit parks the frame as a bytecode
 frame at the raising site's resume ip, exactly as a suspend parks it. It parks
-from the locals and operands the emitter recorded for that site
-([jit.md](../jit.md)). The parked frame then answers to the interpreter's seams
+the locals live at that site and the operands the emitter recorded for it
+([jit-closure.md](../jit-closure.md)). The parked frame then answers to the interpreter's seams
 like any other: a restart replays it, and a discard reads its tables off its
 own `Code`.
 

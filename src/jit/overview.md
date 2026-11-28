@@ -1,6 +1,6 @@
 # The JIT module
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-27 -->
 
 Where each stage of the Cranelift JIT lives, how the translator lays out its variables, and the rules every runtime helper keeps.
 
@@ -55,9 +55,10 @@ itself. The interpreter keeps nil in that stack slot instead, and
 
 The loop header runs `init_locally_defined_vars` on every trip. It sets each
 stack-slot variable to nil, or to a fresh cell where `capture_locals_mask` sets
-the local's bit. A side exit spills the parameter variables, then every
-stack-slot variable, then the site's operands
-([spill.rs](translate/spill.rs)).
+the local's bit. A side exit spills the parameter variables, then each
+stack-slot variable live where the interpreter resumes, then the site's
+operands ([spill.rs](translate/spill.rs),
+[jit-closure.md](../../docs/impl/jit-closure.md)).
 
 ## The runtime helpers
 
