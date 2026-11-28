@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-27
 //! What freezing keeps: every opcode field by field, the records' layout, the pool, the header, the sites.
 //!
 //! docs/impl/lir.md
@@ -17,9 +17,11 @@ use crate::value::{Arity, ConstTemplate, SymbolId, Value};
 mod form;
 mod gpu;
 mod header;
+mod live;
 mod records;
 mod regs;
 mod roundtrip;
+mod slots;
 
 fn r(n: u32) -> Reg {
     Reg(n)

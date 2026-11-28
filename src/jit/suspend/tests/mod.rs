@@ -1,8 +1,8 @@
-// audited: 2026-11-23
+// audited: 2026-11-27
 //! The frame a compiled side exit parks: the shared setup that installs a
 //! closure's compiled code, and one submodule per theme. `fuel` holds the frame
-//! a fuel pause parks, `kill` what a kill leaves, and `cell` where a celled
-//! local parks.
+//! a fuel pause parks, `kill` what a kill leaves, `cell` where a celled local
+//! parks, and `kept` what a local the site does not keep parks as.
 //!
 //! docs/impl/jit.md
 //
@@ -149,6 +149,7 @@ fn as_bytecode_frame(frame: &SuspendedFrame) -> &BytecodeFrame {
 
 mod cell;
 mod fuel;
+mod kept;
 mod kill;
 mod layout;
 mod park;

@@ -3,7 +3,7 @@
 //!
 //! docs/impl/jit-closure.md
 
-use crate::lir::code::SiteRef;
+use crate::lir::code::{LiveSlots, SiteRef};
 use crate::value::Value;
 
 /// The buffer a side exit spills, as its site's metadata records it:
@@ -13,6 +13,12 @@ pub(crate) struct SpillLayout {
     params: u16,
     locals: u16,
     operands: u16,
+    /// The locals the exit stores, or `None` where it stores every one.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "rebuild_frame reads it in the code commit")
+    )]
+    kept: Option<LiveSlots>,
 }
 
 impl SpillLayout {
@@ -22,6 +28,7 @@ impl SpillLayout {
             params: num_params as u16,
             locals: site.num_locals,
             operands: site.stack_regs.len() as u16,
+            kept: None,
         }
     }
 }
@@ -43,6 +50,12 @@ impl SpillLayout {
     /// This layout with `n` operands.
     pub(crate) fn operands(mut self, n: u16) -> Self {
         self.operands = n;
+        self
+    }
+
+    /// This layout, storing the locals in `kept` alone.
+    pub(crate) fn kept(mut self, kept: LiveSlots) -> Self {
+        self.kept = Some(kept);
         self
     }
 }
