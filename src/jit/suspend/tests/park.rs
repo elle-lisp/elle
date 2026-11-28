@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-27
 //! The JIT side-exits park the activation's owner node, so the resumed activation's completion frees it.
 //!
 //! docs/impl/region/owner.md
@@ -35,12 +35,7 @@ fn fresh_member(
 
 #[test]
 fn jit_yield_parks_owner_node_for_resume_completion() {
-    let yield_meta = YieldPointMeta {
-        resume_ip: 0,
-        num_spilled: 0,
-        num_locals: 0,
-        num_params: 0,
-    };
+    let yield_meta = YieldPointMeta::new(0, SpillLayout::default());
     let (mut vm, closure_val) = setup_yield_test(
         vec![Instruction::Return as u8],
         vec![],
@@ -107,13 +102,10 @@ fn jit_yield_through_call_parks_owner_node_for_resume_completion() {
 
     // This test drives the CALL-SITE helper, so the code carries call-site
     // metadata.
-    let code = crate::jit::JitCode::test_with_call_sites(vec![CallSiteMeta {
-        resume_ip: 0,
-        num_spilled: 0,
-        num_locals: 0,
-        num_params: 0,
-        push_resume_value: true,
-    }]);
+    let code = crate::jit::JitCode::test_with_call_sites(vec![CallSiteMeta::new(
+        0,
+        SpillLayout::default(),
+    )]);
     let (mut vm, closure_val) =
         setup_with_code(vec![Instruction::Return as u8], vec![], vec![], code);
     let heap_ptr = vm.heap_ptr;

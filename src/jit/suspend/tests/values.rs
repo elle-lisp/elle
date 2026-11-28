@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-27
 //! What `elle_jit_yield` parks for each yield point: its resume offset, the values of every type unchanged, and the slots the params own.
 //!
 //! docs/impl/jit-closure.md
@@ -8,18 +8,8 @@ use super::*;
 fn test_jit_yield_multiple_yield_points() {
     crate::value::arena::with_test_region(|| {
         let yield_points = vec![
-            YieldPointMeta {
-                num_params: 0,
-                resume_ip: 10,
-                num_spilled: 1,
-                num_locals: 2,
-            },
-            YieldPointMeta {
-                num_params: 0,
-                resume_ip: 20,
-                num_spilled: 3,
-                num_locals: 1,
-            },
+            YieldPointMeta::new(10, SpillLayout::default().locals(2).operands(1)),
+            YieldPointMeta::new(20, SpillLayout::default().locals(1).operands(3)),
         ];
 
         let (mut vm, closure_val) =
@@ -57,12 +47,7 @@ fn test_jit_yield_multiple_yield_points() {
 #[test]
 fn test_jit_yield_preserves_value_types() {
     crate::value::arena::with_test_region(|| {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 0,
-            num_spilled: 2,
-            num_locals: 2,
-        };
+        let yield_meta = YieldPointMeta::new(0, SpillLayout::default().locals(2).operands(2));
 
         let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
@@ -104,12 +89,8 @@ fn test_jit_yield_preserves_value_types() {
 #[test]
 fn test_jit_yield_parks_the_params_own_slots() {
     crate::value::arena::with_test_region(|| {
-        let yield_meta = YieldPointMeta {
-            num_params: 2,
-            resume_ip: 50,
-            num_spilled: 1,
-            num_locals: 2,
-        };
+        let yield_meta =
+            YieldPointMeta::new(50, SpillLayout::default().params(2).locals(2).operands(1));
 
         let (mut vm, closure_val) = setup_yield_test_with_lbox(
             vec![0xBB; 10],

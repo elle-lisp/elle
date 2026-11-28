@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-27
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -12,6 +12,7 @@
 //! primitive signal handling, the capability denial, the native call both
 //! entries run, and the owned-argument retain of a compiled call.
 
+use super::suspend::SpillLayout;
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::jit::TailDeferrals;
 use crate::lir::code::SiteRef;
@@ -46,12 +47,8 @@ pub const YIELD_SENTINEL: JitValue = YIELD_SENTINEL_JV;
 pub(crate) struct YieldPointMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
-    /// Number of spilled values that constitute the operand stack.
-    pub num_spilled: u16,
-    /// Number of local slots, each parameter's own slot included.
-    pub num_locals: u16,
-    /// Number of function parameters (spilled from arg_var_base).
-    pub num_params: u16,
+    /// The buffer the yield spills.
+    pub spill: SpillLayout,
 }
 
 /// Metadata for a single park site in JIT-compiled code: a call, or an
@@ -61,12 +58,8 @@ pub(crate) struct YieldPointMeta {
 pub(crate) struct CallSiteMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
-    /// Number of spilled operand stack values.
-    pub num_spilled: u16,
-    /// Number of local slots, each parameter's own slot included.
-    pub num_locals: u16,
-    /// Number of function parameters (spilled from arg_var_base).
-    pub num_params: u16,
+    /// The buffer the park spills.
+    pub spill: SpillLayout,
     /// Whether a resume delivers its value into the site's result. False for
     /// an instruction that produces no value.
     pub push_resume_value: bool,
@@ -79,23 +72,19 @@ pub(crate) struct CallSiteMeta {
 pub(crate) struct ChargeSiteMeta {
     /// Bytecode IP of the charging instruction, which the resume runs again.
     pub ip: usize,
-    /// Number of spilled operand stack values.
-    pub num_spilled: u16,
-    /// Number of local slots, each parameter's own slot included.
-    pub num_locals: u16,
-    /// Number of function parameters (spilled from arg_var_base).
-    pub num_params: u16,
+    /// The buffer the pause spills.
+    pub spill: SpillLayout,
 }
 
 impl YieldPointMeta {
     /// The metadata for `site` in a function of `num_params` parameters.
     pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
-        YieldPointMeta {
-            resume_ip: site.resume_ip,
-            num_spilled: site.stack_regs.len() as u16,
-            num_locals: site.num_locals,
-            num_params: num_params as u16,
-        }
+        Self::new(site.resume_ip, SpillLayout::of(site, num_params))
+    }
+
+    /// A yield point that resumes at `resume_ip` and spills `spill`.
+    pub(crate) fn new(resume_ip: usize, spill: SpillLayout) -> Self {
+        YieldPointMeta { resume_ip, spill }
     }
 }
 
@@ -103,11 +92,18 @@ impl CallSiteMeta {
     /// The metadata for `site` in a function of `num_params` parameters.
     pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
         CallSiteMeta {
-            resume_ip: site.resume_ip,
-            num_spilled: site.stack_regs.len() as u16,
-            num_locals: site.num_locals,
-            num_params: num_params as u16,
             push_resume_value: site.push_resume_value,
+            ..Self::new(site.resume_ip, SpillLayout::of(site, num_params))
+        }
+    }
+
+    /// A park site that resumes at `resume_ip`, spills `spill`, and delivers
+    /// the resume value into its result.
+    pub(crate) fn new(resume_ip: usize, spill: SpillLayout) -> Self {
+        CallSiteMeta {
+            resume_ip,
+            spill,
+            push_resume_value: true,
         }
     }
 }
@@ -116,12 +112,13 @@ impl ChargeSiteMeta {
     /// The metadata for `site` in a function of `num_params` parameters. A
     /// charge site's resume address is the charging instruction itself.
     pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
-        ChargeSiteMeta {
-            ip: site.resume_ip,
-            num_spilled: site.stack_regs.len() as u16,
-            num_locals: site.num_locals,
-            num_params: num_params as u16,
-        }
+        Self::new(site.resume_ip, SpillLayout::of(site, num_params))
+    }
+
+    /// A charge site whose charging instruction sits at `ip`, and whose pause
+    /// spills `spill`.
+    pub(crate) fn new(ip: usize, spill: SpillLayout) -> Self {
+        ChargeSiteMeta { ip, spill }
     }
 }
 

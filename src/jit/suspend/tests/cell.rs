@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-27
 //! Where `elle_jit_yield` parks a local a nested closure captures: its cell in the env, nil on the stack.
 //!
 //! docs/impl/jit-closure.md
@@ -18,12 +18,8 @@ fn a_celled_local_parks_in_its_env_slot() {
     crate::value::arena::with_test_region(|| {
         // 1 param, which owns local slot 0; locals 1 and 2 past it, and the
         // mask sets bit 1, local 2. One operand.
-        let yield_meta = YieldPointMeta {
-            num_params: 1,
-            resume_ip: 7,
-            num_spilled: 1,
-            num_locals: 3,
-        };
+        let yield_meta =
+            YieldPointMeta::new(7, SpillLayout::default().params(1).locals(3).operands(1));
         let (mut vm, closure_val) = setup_yield_test_with_lbox(
             vec![0xCC; 10],
             vec![],

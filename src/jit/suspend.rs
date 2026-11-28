@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-27
 //! Side-exit helpers for JIT-compiled code: a yield, a park at a site, a fuel pause and a kill.
 //!
 //! docs/impl/jit.md
@@ -84,7 +84,8 @@ fn check_parked_frame(
 
 // The env and stack each side exit rebuilds from its spill buffer.
 mod frame;
-use frame::{rebuild_frame, SpillCounts};
+use frame::rebuild_frame;
+pub(crate) use frame::SpillLayout;
 
 /// Where a side-exit parks its frame, and what it names in the park trace.
 struct ParkSite {
@@ -192,15 +193,7 @@ pub extern "C" fn elle_jit_yield(
         .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield called but no JitCode in cache");
     let yield_meta = &jit_code.yield_points[yield_index as usize];
-    let (env, stack) = rebuild_frame(
-        closure,
-        spilled_values,
-        SpillCounts {
-            num_params: yield_meta.num_params as usize,
-            num_locals: yield_meta.num_locals as usize,
-            num_operands: yield_meta.num_spilled as usize,
-        },
-    );
+    let (env, stack) = rebuild_frame(closure, spilled_values, &yield_meta.spill);
     let resume_ip = yield_meta.resume_ip;
 
     let sig = crate::value::fiber::SignalBits::new(signal_bits);
@@ -331,15 +324,7 @@ pub extern "C" fn elle_jit_yield_through_call(
         .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_yield_through_call called but no JitCode in cache");
     let call_meta = &jit_code.call_sites[call_site_index as usize];
-    let (env, stack) = rebuild_frame(
-        closure,
-        spilled_values,
-        SpillCounts {
-            num_params: call_meta.num_params as usize,
-            num_locals: call_meta.num_locals as usize,
-            num_operands: call_meta.num_spilled as usize,
-        },
-    );
+    let (env, stack) = rebuild_frame(closure, spilled_values, &call_meta.spill);
     // On resume, the callee's return value flows as current_value and is
     // pushed as the site's result, unless the site's instruction produces none.
     let site = ParkSite {

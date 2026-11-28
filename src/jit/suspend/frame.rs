@@ -1,16 +1,50 @@
-// audited: 2026-11-18
+// audited: 2026-11-27
 //! The interpreter frame a compiled side exit rebuilds out of its closure and the spill buffer.
 //!
 //! docs/impl/jit-closure.md
 
+use crate::lir::code::SiteRef;
 use crate::value::Value;
 
-/// The spill counts a side-exit's metadata records: the buffer holds
-/// `[params(num_params), locals(num_locals), operands(num_operands)]`.
-pub(super) struct SpillCounts {
-    pub(super) num_params: usize,
-    pub(super) num_locals: usize,
-    pub(super) num_operands: usize,
+/// The buffer a side exit spills, as its site's metadata records it:
+/// `[params, locals, operands]`, one `Value` each.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SpillLayout {
+    params: u16,
+    locals: u16,
+    operands: u16,
+}
+
+impl SpillLayout {
+    /// The buffer `site` spills in a function of `num_params` parameters.
+    pub(crate) fn of(site: SiteRef<'_>, num_params: usize) -> Self {
+        SpillLayout {
+            params: num_params as u16,
+            locals: site.num_locals,
+            operands: site.stack_regs.len() as u16,
+        }
+    }
+}
+
+#[cfg(test)]
+impl SpillLayout {
+    /// This layout with `n` parameters.
+    pub(crate) fn params(mut self, n: u16) -> Self {
+        self.params = n;
+        self
+    }
+
+    /// This layout with `n` local slots, each parameter's own slot included.
+    pub(crate) fn locals(mut self, n: u16) -> Self {
+        self.locals = n;
+        self
+    }
+
+    /// This layout with `n` operands.
+    pub(crate) fn operands(mut self, n: u16) -> Self {
+        self.operands = n;
+        self
+    }
 }
 
 /// Rebuild the env and the stack the interpreter would hold for this frame,
@@ -23,18 +57,16 @@ pub(super) struct SpillCounts {
 /// its value on the stack and nil in the env. Cells are first-class values in
 /// compiled registers, so a spilled cell is the original object.
 ///
-/// `spilled_values` must point to `num_params + num_locals + num_operands`
-/// contiguous `Value`s, or be null when that sum is 0.
+/// `spilled_values` must point to the `Value`s `layout` names, contiguous, or
+/// be null when it names none.
 pub(super) fn rebuild_frame(
     closure: &crate::value::Closure,
     spilled_values: *const Value,
-    counts: SpillCounts,
+    layout: &SpillLayout,
 ) -> (std::rc::Rc<Vec<Value>>, Vec<Value>) {
-    let SpillCounts {
-        num_params,
-        num_locals,
-        num_operands,
-    } = counts;
+    let num_params = layout.params as usize;
+    let num_locals = layout.locals as usize;
+    let num_operands = layout.operands as usize;
     let total = num_params + num_locals + num_operands;
     let spill: &[Value] = if total == 0 {
         &[]

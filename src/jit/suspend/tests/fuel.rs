@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-27
 //! The frame `elle_jit_fuel_pause` parks: at the charging instruction, with the
 //! interpreter's layout, and with no resume value.
 //!
@@ -27,12 +27,10 @@ fn a_fuel_pause_parks_the_frame_at_the_charging_instruction() {
         let (mut vm, closure_val) = setup_pause_test(
             vec![0xAA; 20],
             vec![Value::int(777)],
-            vec![ChargeSiteMeta {
-                ip: 17,
-                num_spilled: 2,
-                num_locals: 1,
-                num_params: 1,
-            }],
+            vec![ChargeSiteMeta::new(
+                17,
+                SpillLayout::default().params(1).locals(1).operands(2),
+            )],
         );
         let spilled = [
             Value::int(10),
@@ -90,12 +88,7 @@ fn a_resumed_pause_runs_the_charging_instruction_on_the_spilled_stack() {
         let (mut vm, closure_val) = setup_pause_test(
             vec![Instruction::Return as u8],
             vec![],
-            vec![ChargeSiteMeta {
-                ip: 0,
-                num_spilled: 1,
-                num_locals: 0,
-                num_params: 0,
-            }],
+            vec![ChargeSiteMeta::new(0, SpillLayout::default().operands(1))],
         );
         let vm_ptr = &mut vm as *mut crate::vm::VM as *mut ();
         crate::jit::dispatch::elle_jit_push_region_map(vm_ptr);
