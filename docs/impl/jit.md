@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-27 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -58,8 +58,9 @@ prologue uses the same method directly.
 Cranelift builds SSA form from the translator's variables. A read in a block
 that is not yet sealed, and so may still gain a predecessor, adds a block
 parameter, which the seal removes again when every predecessor agrees on the
-value. Each spill reads every local, so a function sealed only at its end pays
-time and memory for its blocks times its locals.
+value. Each spill reads the locals live at its site
+([jit-closure.md](jit-closure.md)), so a function sealed only at its end pays
+time and memory for its blocks times those locals.
 
 The translator seals an LIR block once every block that jumps to it has been
 translated ([seal.rs](../../src/jit/compiler/seal.rs)). A read in a block that
@@ -285,7 +286,7 @@ Pinning tests: [jit_entry/tests.rs](../../src/vm/jit_entry/tests.rs).
 ## How a signal leaves compiled code
 
 Compiled code has no resume point of its own. An `Emit` spills the frame's
-locals and operands and calls `elle_jit_yield`, which installs the signal in
+live locals and its operands and calls `elle_jit_yield`, which installs the signal in
 `fiber.signal` and parks the frame as a bytecode frame at the emit's resume
 ip, so the interpreter runs the continuation when the fiber resumes. An error
 emit parks the same way, because an error unwinds nothing

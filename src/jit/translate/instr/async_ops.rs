@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-27
 //! Lowering the destructure, type-test, struct and array-mut instructions, the
 //! spliced calls among them.
 //!
@@ -262,7 +262,7 @@ impl<'a> FunctionTranslator<'a> {
                 args_region,
                 ..
             } => {
-                self.emit_charge(builder)?;
+                self.emit_charge(builder, Resumes::AtNode)?;
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
@@ -291,7 +291,7 @@ impl<'a> FunctionTranslator<'a> {
                 args_region,
                 ..
             } => {
-                self.emit_charge(builder)?;
+                self.emit_charge(builder, Resumes::AtNode)?;
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {

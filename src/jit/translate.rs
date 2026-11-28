@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-27
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -50,6 +50,8 @@ mod spill;
 mod terminator;
 
 pub(crate) use params::BindSite;
+pub(crate) use spill::KeptLocals;
+pub(crate) use spill::{Resumes, Site};
 
 /// Translator for a single function
 pub(crate) struct FunctionTranslator<'a> {
@@ -91,6 +93,11 @@ pub(crate) struct FunctionTranslator<'a> {
     /// Shared stack slot for spilling locals + operands at yield, call and
     /// charge sites.
     pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
+    /// Which locals are live where each side exit resumes, or `None` in a
+    /// function with no site.
+    pub(crate) spill_liveness: Option<spill::SpillLiveness>,
+    /// The locals each side exit stored, which its site's metadata records.
+    pub(crate) kept_locals: spill::KeptLocals,
     /// Immutable heap-literal templates baked by `MaterializeConst` (a string, or
     /// a quoted compound structure). The native code holds a raw pointer to each
     /// `ConstTemplate`, so they must outlive the JIT code; ownership is
@@ -194,6 +201,8 @@ impl<'a> FunctionTranslator<'a> {
                 .collect(),
             current_block: 0,
             shared_spill_slot: None,
+            spill_liveness: spill::SpillLiveness::of(&lir),
+            kept_locals: spill::KeptLocals::of(&lir),
             templates: Vec::new(),
             uses_activation_owner_node,
         }

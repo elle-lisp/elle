@@ -1,9 +1,9 @@
-// audited: 2026-11-18
+// audited: 2026-11-27
 //! The two exits at a compiled charge site: the fuel pause, which parks the frame, and the kill, which parks nothing.
 //!
 //! docs/impl/jit-fuel.md
 
-use super::{park_activation, rebuild_frame, ParkSite, SpillCounts, YIELD_SENTINEL};
+use super::{park_activation, rebuild_frame, ParkSite, YIELD_SENTINEL};
 use crate::jit::value::JitValue;
 use crate::value::Value;
 
@@ -48,15 +48,7 @@ pub extern "C" fn elle_jit_fuel_pause(
         .jit_code_for(bytecode_ptr)
         .expect("VM bug: elle_jit_fuel_pause called but no JitCode in cache");
     let charge_meta = &jit_code.charge_sites[charge_site_index as usize];
-    let (env, stack) = rebuild_frame(
-        closure,
-        spilled_values,
-        SpillCounts {
-            num_params: charge_meta.num_params as usize,
-            num_locals: charge_meta.num_locals as usize,
-            num_operands: charge_meta.num_spilled as usize,
-        },
-    );
+    let (env, stack) = rebuild_frame(closure, spilled_values, &charge_meta.spill);
 
     let site = ParkSite {
         helper: "jit-fuel-pause",

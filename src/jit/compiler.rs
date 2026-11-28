@@ -1,4 +1,4 @@
-// audited: 2026-11-26
+// audited: 2026-11-27
 // docs/impl/jit.md
 // docs/impl/verifier.md
 //! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
@@ -33,11 +33,6 @@ use super::translate::{finalize_function, BindSite, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
 
-/// What translating one function yields, kept alive by its `JitCode`: the
-/// heap-literal templates the native code's baked pointers point into.
-#[allow(clippy::vec_box)] // the Box stable-address is the point (see `JitCode`)
-type TranslatedConsts = Vec<Box<crate::value::ConstTemplate>>;
-
 /// Set once the VM that asked for a compile has dropped its worker, and read
 /// by the compile at each point where it can stop (docs/impl/jit.md).
 #[derive(Clone, Default)]
@@ -67,6 +62,7 @@ pub struct JitCompiler {
 
 mod seal;
 mod translate;
+use translate::Translated;
 
 impl JitCompiler {
     /// Create a JIT compiler for the host, which runs Cranelift's verifier on
@@ -186,7 +182,8 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let templates = self.translate_function(lir, children, func_id, &mut ctx.func)?;
+        let Translated { templates, kept } =
+            self.translate_function(lir, children, func_id, &mut ctx.func)?;
         // The backend cannot be interrupted, so this is the last place to stop.
         if self.abandon.is_set() {
             return Err(JitError::Abandoned);
@@ -204,20 +201,25 @@ impl JitCompiler {
         let fn_ptr = self.module.get_finalized_function(func_id);
         super::registry::record(fn_ptr as usize, func_name);
 
-        // The side-exit metadata, from the sites emission recorded.
+        // The side-exit metadata, from the sites emission recorded and the
+        // locals each exit stored.
         use super::dispatch::{CallSiteMeta, ChargeSiteMeta, YieldPointMeta};
+        use super::suspend::SpillLayout;
         let num_params = lir.num_params();
         let yield_metas = lir
             .yield_points()
-            .map(|s| YieldPointMeta::of(s, num_params))
+            .zip(kept.yields)
+            .map(|(s, k)| YieldPointMeta::of(s, SpillLayout::of(s, num_params, k)))
             .collect();
         let call_site_metas = lir
             .call_sites()
-            .map(|s| CallSiteMeta::of(s, num_params))
+            .zip(kept.calls)
+            .map(|(s, k)| CallSiteMeta::of(s, SpillLayout::of(s, num_params, k)))
             .collect();
         let charge_site_metas = lir
             .charge_sites()
-            .map(|s| ChargeSiteMeta::of(s, num_params))
+            .zip(kept.charges)
+            .map(|(s, k)| ChargeSiteMeta::of(s, SpillLayout::of(s, num_params, k)))
             .collect();
 
         // Wrap in JitCode (module is moved to keep code alive)

@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-27
 //! The prologue a compiled function runs on its six parameters, then the walk
 //! that translates each LIR block and seals it.
 //!
@@ -8,6 +8,17 @@
 
 use super::seal::Unsealed;
 use super::*;
+use crate::jit::translate::KeptLocals;
+
+/// What translating one function yields.
+pub(super) struct Translated {
+    /// The heap-literal templates the native code's baked pointers point
+    /// into, which its `JitCode` keeps alive.
+    #[allow(clippy::vec_box)] // the Box stable-address is the point (see `JitCode`)
+    pub(super) templates: Vec<Box<crate::value::ConstTemplate>>,
+    /// The locals each side exit stores, which its site's metadata records.
+    pub(super) kept: KeptLocals,
+}
 
 impl JitCompiler {
     /// Translate LIR function to Cranelift IR
@@ -21,14 +32,14 @@ impl JitCompiler {
     /// calls (docs/impl/jit-selfcall.md).
     ///
     /// Answers the constant templates the native code bakes pointers into,
-    /// which its `JitCode` keeps alive.
+    /// which its `JitCode` keeps alive, and the locals each side exit stores.
     pub(super) fn translate_function(
         &mut self,
         lir: &LirView<'_>,
         children: ChildTable<'_>,
         own: FuncId,
         func: &mut Function,
-    ) -> Result<TranslatedConsts, JitError> {
+    ) -> Result<Translated, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
@@ -157,10 +168,11 @@ impl JitCompiler {
             }
             let cl_block = block_map[&bb.label()];
             builder.switch_to_block(cl_block);
-            translator.current_block = position;
+            translator.enter_block(position);
 
             let mut block_terminated = false;
             for (i, node) in bb.nodes().enumerate() {
+                translator.enter_node(i);
                 if translator.translate_instr(&mut builder, &node.instr(), &block_map)? {
                     translator.skip_unreached_sites(
                         bb.nodes().skip(i + 1).map(|n| n.instr()),
@@ -214,6 +226,9 @@ impl JitCompiler {
         builder.seal_all_blocks();
         finalize_function(builder, translator.module);
 
-        Ok(translator.templates)
+        Ok(Translated {
+            templates: translator.templates,
+            kept: translator.kept_locals,
+        })
     }
 }

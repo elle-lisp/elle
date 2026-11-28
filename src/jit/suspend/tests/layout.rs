@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-27
 //! The frame `elle_jit_yield` parks: the env holds captures, params and a slot
 //! per local past them, and locals then operands fill its stack.
 //!
@@ -10,12 +10,8 @@ use super::*;
 fn test_jit_yield_builds_correct_suspended_frame() {
     crate::value::arena::with_test_region(|| {
         // 2 params, 1 local, 3 operands
-        let yield_meta = YieldPointMeta {
-            num_params: 2,
-            resume_ip: 42,
-            num_spilled: 3, // operand count
-            num_locals: 1,  // 1 locally-defined
-        };
+        let yield_meta =
+            YieldPointMeta::new(42, SpillLayout::default().params(2).locals(1).operands(3));
 
         let bytecode = vec![0xAA; 10];
         let constants = vec![Value::int(999)];
@@ -82,12 +78,7 @@ fn test_jit_yield_builds_correct_suspended_frame() {
 #[test]
 fn test_jit_yield_zero_locals_zero_operands() {
     crate::value::arena::with_test_region(|| {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 0,
-            num_spilled: 0,
-            num_locals: 0,
-        };
+        let yield_meta = YieldPointMeta::new(0, SpillLayout::default());
 
         let (mut vm, closure_val) = setup_yield_test(vec![], vec![], vec![], vec![yield_meta]);
 
@@ -117,12 +108,7 @@ fn test_jit_yield_zero_locals_zero_operands() {
 #[test]
 fn test_jit_yield_only_operands_no_locals() {
     crate::value::arena::with_test_region(|| {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 10,
-            num_spilled: 2,
-            num_locals: 0,
-        };
+        let yield_meta = YieldPointMeta::new(10, SpillLayout::default().operands(2));
 
         let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
@@ -149,12 +135,7 @@ fn test_jit_yield_only_operands_no_locals() {
 #[test]
 fn test_jit_yield_only_locals_no_operands() {
     crate::value::arena::with_test_region(|| {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 5,
-            num_spilled: 0,
-            num_locals: 3,
-        };
+        let yield_meta = YieldPointMeta::new(5, SpillLayout::default().locals(3));
 
         let (mut vm, closure_val) = setup_yield_test(vec![0x02], vec![], vec![], vec![yield_meta]);
 
@@ -187,12 +168,7 @@ fn test_jit_yield_only_locals_no_operands() {
 #[test]
 fn test_jit_yield_large_spill() {
     crate::value::arena::with_test_region(|| {
-        let yield_meta = YieldPointMeta {
-            num_params: 0,
-            resume_ip: 99,
-            num_spilled: 20,
-            num_locals: 10,
-        };
+        let yield_meta = YieldPointMeta::new(99, SpillLayout::default().locals(10).operands(20));
 
         let (mut vm, closure_val) = setup_yield_test(vec![0xFF], vec![], vec![], vec![yield_meta]);
 

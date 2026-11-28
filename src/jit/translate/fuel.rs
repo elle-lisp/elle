@@ -1,4 +1,4 @@
-// audited: 2026-10-25
+// audited: 2026-11-27
 // docs/impl/jit-fuel.md
 // docs/signals/inference.md
 // benches/README.md
@@ -27,12 +27,18 @@ impl<'a> FunctionTranslator<'a> {
     /// Every charge reads the kill word first, and a budget below it leaves
     /// the function through `emit_kill_check`. In a function that may signal,
     /// the charge then pauses on zero, and otherwise stores the word less one.
-    /// The pause spills the operand stack the site recorded, parks the frame at
-    /// the charging instruction through `elle_jit_fuel_pause`, and returns its
-    /// sentinel. In a silent function, stores the word less one unless it is
+    /// The pause spills the locals live where `at` resumes and the operand
+    /// stack the site recorded, parks the frame at the charging instruction
+    /// through `elle_jit_fuel_pause`, and returns its sentinel. A charge before
+    /// a call resumes at the call, and one on a backward edge at the edge's
+    /// target. In a silent function, stores the word less one unless it is
     /// zero, and nothing but the kill leaves the function. The builder is left
     /// on the block that continues past the charge.
-    pub(crate) fn emit_charge(&mut self, builder: &mut FunctionBuilder) -> Result<(), JitError> {
+    pub(crate) fn emit_charge(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        at: Resumes,
+    ) -> Result<(), JitError> {
         let vm = self
             .vm_ptr
             .ok_or_else(|| JitError::InvalidLir("fuel charge without vm pointer".to_string()))?;
@@ -61,7 +67,8 @@ impl<'a> FunctionTranslator<'a> {
             .lir
             .charge_site(index as usize)
             .expect("next_charge_site checked the index");
-        let spilled_ptr = self.spill_locals_and_operands(builder, site.stack_regs)?;
+        let spilled_ptr =
+            self.spill_locals_and_operands(builder, Site::Charge(index), at, site.stack_regs)?;
         let index_val = builder.ins().iconst(I64, index as i64);
         let func_ref = self
             .module
